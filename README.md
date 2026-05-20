@@ -1,2 +1,2 @@
-# qxt-chat-web
-qxt-chat
+# Chat-QXT AI
+Chat-QXT AI
