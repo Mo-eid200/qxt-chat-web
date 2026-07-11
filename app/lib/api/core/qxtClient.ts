@@ -1,1019 +1,482 @@
-// app/lib/core/qxtClient.ts
-
 import axios, {
   AxiosError,
-  type AxiosInstance,
-  type InternalAxiosRequestConfig,
+  AxiosInstance,
+  InternalAxiosRequestConfig,
 } from "axios";
 
-/* ======================================================
-   CONSTANTS
-====================================================== */
+/* =========================================================
+   CONFIG
+========================================================= */
 
-const API_BASE_URL =
-  process.env
-    .NEXT_PUBLIC_QXT_API_BASE_URL
-    ?.trim() ||
-  "http://127.0.0.1:8000";
+export const API_BASE_URL = (
+  process.env.NEXT_PUBLIC_QXT_API_BASE_URL || "http://127.0.0.1:8000"
+).replace(/\/+$/, "");
 
-const DEFAULT_TIMEOUT =
-  30_000;
+const DEFAULT_TIMEOUT = 30_000;
+const RETRY_DELAY     = 1_200;
+const MAX_RETRIES     = 2;
 
-/* ======================================================
+/* =========================================================
    STORAGE KEYS
-====================================================== */
+========================================================= */
 
-export const QXT_TOKEN_KEY =
-  "qxt_access_token";
+export const QXT_TOKEN_KEY        = "qxt_access_token";
+export const QXT_API_KEY          = "qxt_api_key";
+export const QXT_WORKSPACE_KEY    = "qxt_workspace_id";
+export const QXT_COMPANY_KEY      = "qxt_company_id";
+export const QXT_CONTEXT_KEY      = "qxt_runtime_context";
+export const QXT_LAST_SESSION_KEY = "qxt_last_session_id";
 
-export const QXT_API_KEY =
-  "qxt_api_key";
+/* =========================================================
+   TYPES
+========================================================= */
 
-export const QXT_COMPANY_KEY =
-  "qxt_company_id";
+type NullableString = string | null;
 
-export const QXT_WORKSPACE_KEY =
-  "qxt_workspace_id";
+export type SpaceType = "personal" | "workspace";
 
-/* ======================================================
- CONTEXT STORAGE
-====================================================== */
-
-export const QXT_CONTEXT_KEY =
-  "qxt_context";
-
-/* ======================================================
-   CONTEXT TYPES
-====================================================== */
+export type LegacyRuntimeScopeType = "personal" | "workspace" | "agent";
 
 export type StoredContext = {
-  workspaceId: string | null;
-
-  environment:
-  | "personal"
-  | "workspace";
+  spaceType?:     SpaceType;
+  workspaceId?:   string | null;
+  activeAgentId?: string | null;
+  companyId?:     string | number | null;
+  // backward compat
+  scopeType?: LegacyRuntimeScopeType;
+  agentId?:   string | null;
 };
 
-/* ======================================================
-   CONTEXT HELPERS
-====================================================== */
+export type NormalizedStoredContext = {
+  spaceType:     SpaceType;
+  workspaceId:   string | null;
+  activeAgentId: string | null;
+  companyId:     string | null;
+};
 
-export function getStoredContext(): StoredContext {
-  if (
-    typeof window ===
-    "undefined"
-  ) {
-    return {
-      workspaceId: null,
-      environment: "personal",
-    };
-  }
+type RetryableConfig = InternalAxiosRequestConfig & {
+  __retryCount?: number;
+  __client?:     AxiosInstance;
+};
 
+/* =========================================================
+   DEFAULT CONTEXT
+========================================================= */
+
+const DEFAULT_CONTEXT: Readonly<NormalizedStoredContext> = {
+  spaceType:     "personal",
+  workspaceId:   null,
+  activeAgentId: null,
+  companyId:     null,
+};
+
+/* =========================================================
+   STORAGE HELPERS
+========================================================= */
+
+function storageGet(key: string): NullableString {
+  if (typeof window === "undefined") return null;
   try {
-    const raw =
-      localStorage.getItem(
-        QXT_CONTEXT_KEY
-      );
-
-    if (!raw) {
-      return {
-        workspaceId: null,
-        environment: "personal",
-      };
-    }
-
-    const parsed =
-      JSON.parse(raw);
-
-    return {
-      workspaceId:
-        typeof parsed?.workspaceId ===
-          "string"
-          ? parsed.workspaceId
-          : null,
-
-      environment:
-        parsed?.environment ===
-          "workspace"
-          ? "workspace"
-          : "personal",
-    };
+    return localStorage.getItem(key);
   } catch {
-    return {
-      workspaceId: null,
-      environment: "personal",
-    };
+    return null;
   }
 }
 
-export function setStoredContext(
-  context: Partial<StoredContext>
-): void {
-  if (
-    typeof window ===
-    "undefined"
-  ) {
-    return;
-  }
-
-  const current =
-    getStoredContext();
-
-  const next: StoredContext = {
-    workspaceId:
-      context.workspaceId ??
-      current.workspaceId ??
-      null,
-
-    environment:
-      context.environment ??
-      current.environment ??
-      "personal",
-  };
-
+function storageSet(key: string, value: NullableString): void {
+  if (typeof window === "undefined") return;
   try {
-    localStorage.setItem(
-      QXT_CONTEXT_KEY,
-      JSON.stringify(next)
-    );
-  } catch {
-    //
+    if (value && value.trim()) {
+      localStorage.setItem(key, value);
+    } else {
+      localStorage.removeItem(key);
+    }
+  } catch { /* ignore */ }
+}
+
+/* =========================================================
+   NORMALIZE
+========================================================= */
+
+function normalize(value: NullableString): NullableString {
+  if (!value) return null;
+  const trimmed = value.trim();
+  return trimmed || null;
+}
+
+function normalizeUnknownString(value: unknown): NullableString {
+  if (value === null || value === undefined) return null;
+  return normalize(String(value));
+}
+
+function normalizeSpaceType(value: unknown): SpaceType {
+  return value === "workspace" ? "workspace" : "personal";
+}
+
+function normalizeStoredContext(
+  raw: StoredContext | null | undefined
+): NormalizedStoredContext {
+  if (!raw) {
+    return { ...DEFAULT_CONTEXT, companyId: getStoredCompany() };
   }
 
-  /* ============================================
-     SYNC LEGACY STORAGE
-  ============================================ */
+  const legacySpaceType: SpaceType =
+    raw.scopeType === "workspace" ? "workspace" : "personal";
 
-  applyWorkspaceEverywhere(
-    next.workspaceId
-  );
+  return {
+    spaceType:     normalizeSpaceType(raw.spaceType ?? legacySpaceType),
+    workspaceId:   normalize(raw.workspaceId ?? null),
+    activeAgentId: normalize(raw.activeAgentId ?? raw.agentId ?? null),
+    companyId:     normalizeUnknownString(raw.companyId ?? getStoredCompany()),
+  };
+}
+
+/* =========================================================
+   VALIDATION
+========================================================= */
+
+function isUuid(value: NullableString): boolean {
+  if (!value) return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function isNumericString(value: NullableString): boolean {
+  if (!value) return false;
+  return /^\d+$/.test(value.trim());
+}
+
+/* =========================================================
+   TOKEN
+========================================================= */
+
+export function getStoredToken(): NullableString {
+  return normalize(storageGet(QXT_TOKEN_KEY));
+}
+
+export function setStoredToken(token: NullableString): void {
+  storageSet(QXT_TOKEN_KEY, normalize(token));
+}
+
+/* =========================================================
+   API KEY
+========================================================= */
+
+export function getStoredApiKey(): NullableString {
+  return normalize(storageGet(QXT_API_KEY));
+}
+
+export function setStoredApiKey(apiKey: NullableString): void {
+  storageSet(QXT_API_KEY, normalize(apiKey));
+}
+
+/* =========================================================
+   WORKSPACE
+========================================================= */
+
+export function getStoredWorkspace(): NullableString {
+  return normalize(storageGet(QXT_WORKSPACE_KEY));
+}
+
+export function setStoredWorkspace(workspaceId: NullableString): void {
+  storageSet(QXT_WORKSPACE_KEY, normalize(workspaceId));
+}
+
+/* =========================================================
+   COMPANY
+========================================================= */
+
+export function getStoredCompany(): NullableString {
+  return normalize(storageGet(QXT_COMPANY_KEY));
+}
+
+export function setStoredCompany(companyId: NullableString): void {
+  storageSet(QXT_COMPANY_KEY, normalize(companyId));
+}
+
+/* =========================================================
+   LAST SESSION
+========================================================= */
+
+export function getStoredLastSession(): NullableString {
+  return normalize(storageGet(QXT_LAST_SESSION_KEY));
+}
+
+export function setStoredLastSession(sessionId: NullableString): void {
+  storageSet(QXT_LAST_SESSION_KEY, normalize(sessionId));
+}
+
+/* =========================================================
+   RUNTIME CONTEXT
+========================================================= */
+
+export function getStoredContext(): NormalizedStoredContext {
+  try {
+    const raw = storageGet(QXT_CONTEXT_KEY);
+    if (!raw) return { ...DEFAULT_CONTEXT, companyId: getStoredCompany() };
+    const parsed = JSON.parse(raw) as StoredContext;
+    return normalizeStoredContext(parsed);
+  } catch {
+    return { ...DEFAULT_CONTEXT, companyId: getStoredCompany() };
+  }
+}
+
+export function setStoredContext(context: StoredContext): void {
+  try {
+    const normalized = normalizeStoredContext(context);
+
+    const persisted: StoredContext = {
+      spaceType:     normalized.spaceType,
+      workspaceId:   normalized.workspaceId,
+      activeAgentId: normalized.activeAgentId,
+      companyId:     normalized.companyId,
+      // backward compat
+      scopeType: normalized.spaceType,
+      agentId:   normalized.activeAgentId,
+    };
+
+    storageSet(QXT_CONTEXT_KEY, JSON.stringify(persisted));
+    setStoredWorkspace(normalized.workspaceId);
+    setStoredCompany(normalized.companyId);
+  } catch { /* ignore */ }
 }
 
 export function clearStoredContext(): void {
-  if (
-    typeof window ===
-    "undefined"
-  ) {
-    return;
-  }
-
-  try {
-    localStorage.removeItem(
-      QXT_CONTEXT_KEY
-    );
-  } catch {
-    //
-  }
-
-  applyWorkspaceEverywhere(
-    null
-  );
+  storageSet(QXT_CONTEXT_KEY, null);
+  setStoredWorkspace(null);
+  setStoredCompany(null);
 }
 
-/* ======================================================
-   TYPES
-====================================================== */
+/* =========================================================
+   AXIOS CLIENT FACTORY
+========================================================= */
 
-type NullableString =
-  string | null;
-
-/* ======================================================
-   STORAGE HELPERS
-====================================================== */
-
-function safeStorageGet(
-  key: string
-): NullableString {
-  if (
-    typeof window ===
-    "undefined"
-  ) {
-    return null;
-  }
-
-  try {
-    return (
-      localStorage.getItem(
-        key
-      ) || null
-    );
-  } catch {
-    return null;
-  }
-}
-
-function safeStorageSet(
-  key: string,
-  value: NullableString
-): void {
-  if (
-    typeof window ===
-    "undefined"
-  ) {
-    return;
-  }
-
-  try {
-    if (
-      value &&
-      value.trim()
-    ) {
-      localStorage.setItem(
-        key,
-        value.trim()
-      );
-    } else {
-      localStorage.removeItem(
-        key
-      );
-    }
-  } catch {
-    //
-    // ignore storage errors
-    //
-  }
-}
-
-/* ======================================================
-   TOKEN STORAGE
-====================================================== */
-
-export function getStoredToken(): NullableString {
-  return safeStorageGet(
-    QXT_TOKEN_KEY
-  );
-}
-
-export function setStoredToken(
-  token: NullableString
-): void {
-  safeStorageSet(
-    QXT_TOKEN_KEY,
-    token
-  );
-}
-
-/* ======================================================
-   API KEY STORAGE
-====================================================== */
-
-export function getStoredApiKey(): NullableString {
-  return safeStorageGet(
-    QXT_API_KEY
-  );
-}
-
-export function setStoredApiKey(
-  apiKey: NullableString
-): void {
-  safeStorageSet(
-    QXT_API_KEY,
-    apiKey
-  );
-}
-
-/* ======================================================
-   COMPANY STORAGE
-====================================================== */
-
-export function getStoredCompany(): NullableString {
-  return safeStorageGet(
-    QXT_COMPANY_KEY
-  );
-}
-
-export function setStoredCompany(
-  companyId: NullableString
-): void {
-  safeStorageSet(
-    QXT_COMPANY_KEY,
-    companyId
-  );
-}
-
-/* ======================================================
-   WORKSPACE STORAGE
-====================================================== */
-
-export function getStoredWorkspace(): NullableString {
-  return safeStorageGet(
-    QXT_WORKSPACE_KEY
-  );
-}
-
-export function setStoredWorkspace(
-  workspaceId: NullableString
-): void {
-  safeStorageSet(
-    QXT_WORKSPACE_KEY,
-    workspaceId
-  );
-}
-
-/* ======================================================
-   VALIDATORS
-====================================================== */
-
-function normalizeValue(
-  value: NullableString
-): NullableString {
-  if (!value) {
-    return null;
-  }
-
-  const normalized =
-    value.trim();
-
-  return normalized ||
-    null;
-}
-
-function isValidUuid(
-  value: NullableString
-): boolean {
-  if (!value) {
-    return false;
-  }
-
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-    value.trim()
-  );
-}
-
-/* ======================================================
-   HEADER HELPERS
-====================================================== */
-
-function clearHeader(
-  client: AxiosInstance,
-  headerName: string
-): void {
-  try {
-    delete (
-      client.defaults.headers
-        .common as Record<
-          string,
-          unknown
-        >
-    )[headerName];
-  } catch {
-    //
-  }
-}
-
-/* ======================================================
-   AXIOS FACTORY
-====================================================== */
-
-function createClient() {
+function createClient(timeout = DEFAULT_TIMEOUT): AxiosInstance {
   return axios.create({
-    baseURL:
-      API_BASE_URL,
-
-    timeout:
-      DEFAULT_TIMEOUT,
-
-    withCredentials: false,
-
+    baseURL:         API_BASE_URL,
+    timeout,
+    withCredentials: true,
     headers: {
-      "Content-Type":
-        "application/json",
+      Accept:         "application/json",
+      "Content-Type": "application/json",
     },
   });
 }
 
-/* ======================================================
+/* =========================================================
    CLIENTS
-====================================================== */
+========================================================= */
 
-export const qxtAuthClient =
-  createClient();
+export const qxtApiClient  = createClient(15_000);
+export const qxtAuthClient = createClient(15_000);
+export const qxtChatClient = createClient(60_000);
 
-export const qxtChatClient =
-  createClient();
+/* =========================================================
+   AUTH HEADER INJECTOR
+========================================================= */
 
-export const qxtApiClient =
-  createClient();
-
-/* ======================================================
-   ENV API KEY
-====================================================== */
-
-const ENV_API_KEY =
-  normalizeValue(
-    process.env
-      .NEXT_PUBLIC_QXT_API_KEY ||
-    null
-  );
-
-if (ENV_API_KEY) {
-  qxtApiClient.defaults.headers.common[
-    "X-API-Key"
-  ] = ENV_API_KEY;
-}
-
-/* ======================================================
-   TOKEN HELPERS
-====================================================== */
-
-function applyAuthHeader(
-  client: AxiosInstance,
-  token: NullableString
-): void {
-  const normalized =
-    normalizeValue(token);
-
-  if (normalized) {
-    client.defaults.headers.common.Authorization =
-      `Bearer ${normalized}`;
-  } else {
-    clearHeader(
-      client,
-      "Authorization"
-    );
-  }
-}
-
-export function applyTokenEverywhere(
-  token: NullableString
-): void {
-  setStoredToken(token);
-
-  const clients = [
-    qxtAuthClient,
-    qxtChatClient,
-    qxtApiClient,
-  ];
-
-  for (const client of clients) {
-    applyAuthHeader(
-      client,
-      token
-    );
-  }
-}
-
-/* ======================================================
-   API KEY HELPERS
-====================================================== */
-
-export function setApiKeyHeader(
-  apiKey: NullableString
-): void {
-  setStoredApiKey(
-    apiKey
-  );
-
-  const normalized =
-    normalizeValue(
-      apiKey
-    );
-
-  const clients = [
-    qxtAuthClient,
-    qxtChatClient,
-    qxtApiClient,
-  ];
-
-  for (const client of clients) {
-    if (normalized) {
-      client.defaults.headers.common[
-        "X-API-Key"
-      ] = normalized;
-    } else {
-      clearHeader(
-        client,
-        "X-API-Key"
-      );
-    }
-  }
-}
-
-/* ======================================================
-   COMPANY HELPERS
-====================================================== */
-
-export function applyCompanyEverywhere(
-  companyId: NullableString
-): void {
-  const normalized =
-    normalizeValue(
-      companyId
-    );
-
-  const clients = [
-    qxtAuthClient,
-    qxtChatClient,
-    qxtApiClient,
-  ];
-
-  if (!normalized) {
-    setStoredCompany(
-      null
-    );
-
-    for (const client of clients) {
-      clearHeader(
-        client,
-        "X-Company-Id"
-      );
-    }
-
-    return;
-  }
-
-  if (
-    !isValidUuid(
-      normalized
-    )
-  ) {
-    console.warn(
-      "[Company] Invalid company id:",
-      normalized
-    );
-
-    return;
-  }
-
-  setStoredCompany(
-    normalized
-  );
-
-  for (const client of clients) {
-    client.defaults.headers.common[
-      "X-Company-Id"
-    ] = normalized;
-  }
-}
-
-/* ======================================================
-   WORKSPACE HELPERS
-====================================================== */
-
-export function applyWorkspaceEverywhere(
-  workspaceId: NullableString
-): void {
-  const normalized =
-    normalizeValue(
-      workspaceId
-    );
-
-  const clients = [
-    qxtAuthClient,
-    qxtChatClient,
-    qxtApiClient,
-  ];
-
-  if (!normalized) {
-    setStoredWorkspace(
-      null
-    );
-
-    for (const client of clients) {
-      clearHeader(
-        client,
-        "X-Workspace-Id"
-      );
-    }
-
-    return;
-  }
-
-  if (
-    !isValidUuid(
-      normalized
-    )
-  ) {
-    console.warn(
-      "[Workspace] Invalid workspace id:",
-      normalized
-    );
-
-    return;
-  }
-
-  setStoredWorkspace(
-    normalized
-  );
-
-  for (const client of clients) {
-    client.defaults.headers.common[
-      "X-Workspace-Id"
-    ] = normalized;
-  }
-}
-
-/* ======================================================
-   LOGIN / LOGOUT
-====================================================== */
-
-export function loginSideEffects(
-  token: string
-): void {
-  applyCompanyEverywhere(
-    null
-  );
-
-  applyWorkspaceEverywhere(
-    null
-  );
-
-  applyTokenEverywhere(
-    token
-  );
-}
-
-export function logoutSideEffects(): void {
-  applyTokenEverywhere(
-    null
-  );
-
-  setApiKeyHeader(
-    null
-  );
-
-  applyCompanyEverywhere(
-    null
-  );
-
-  applyWorkspaceEverywhere(
-    null
-  );
-}
-
-/* ======================================================
-   REQUEST INTERCEPTOR
-====================================================== */
-
-function attachAuth(
+function attachAuthHeaders(
   config: InternalAxiosRequestConfig
 ): InternalAxiosRequestConfig {
-  config.headers =
-    config.headers || {};
+  config.headers = config.headers || {};
 
-  // ====================================================
-  // TOKEN
-  // ====================================================
-
-  const token =
-    normalizeValue(
-      getStoredToken()
-    );
+  const token   = getStoredToken();
+  const apiKey  = getStoredApiKey();
+  const runtime = getStoredContext();
 
   if (token) {
-    config.headers.Authorization =
-      `Bearer ${token}`;
-
-    delete config.headers[
-      "X-API-Key"
-    ];
-  } else {
-    const apiKey =
-      normalizeValue(
-        getStoredApiKey() ||
-        ENV_API_KEY
-      );
-
-    if (apiKey) {
-      config.headers[
-        "X-API-Key"
-      ] = apiKey;
-    }
+    config.headers.Authorization = `Bearer ${token}`;
+  } else if (apiKey) {
+    config.headers["X-API-Key"] = apiKey;
   }
 
-  // ====================================================
-  // COMPANY
-  // ====================================================
+  config.headers["X-Space-Type"] = runtime.spaceType;
+  config.headers["X-Scope-Type"] = runtime.spaceType;
 
-  const companyId =
-    normalizeValue(
-      getStoredCompany()
-    );
-
-  if (
-    companyId &&
-    isValidUuid(
-      companyId
-    )
-  ) {
-    config.headers[
-      "X-Company-Id"
-    ] = companyId;
+  if (runtime.spaceType === "workspace" && isUuid(runtime.workspaceId)) {
+    config.headers["X-Workspace-ID"] = runtime.workspaceId;
   }
 
-  // ====================================================
-  // WORKSPACE
-  // ====================================================
+  if (isUuid(runtime.activeAgentId)) {
+    config.headers["X-Agent-ID"] = runtime.activeAgentId;
+  }
 
-  const workspaceId =
-    normalizeValue(
-      getStoredWorkspace()
-    );
-
-  if (
-    workspaceId &&
-    isValidUuid(
-      workspaceId
-    )
-  ) {
-    config.headers[
-      "X-Workspace-Id"
-    ] = workspaceId;
+  if (isNumericString(runtime.companyId)) {
+    config.headers["X-Company-ID"] = runtime.companyId;
   }
 
   return config;
 }
 
-/* ======================================================
-   RESPONSE INTERCEPTOR
-====================================================== */
+/* =========================================================
+   RETRY
+========================================================= */
 
-function shouldLogoutOn401(
-  error: AxiosError
-): boolean {
-  const status =
-    error.response
-      ?.status;
+function isRetryEligible(config?: RetryableConfig): boolean {
+  if (!config) return false;
 
-  if (status !== 401) {
-    return false;
-  }
+  const method = (config.method || "get").toLowerCase();
+  const url    = config.url || "";
 
-  const token =
-    getStoredToken();
+  if (method !== "get") return false;
 
-  if (!token) {
-    return false;
-  }
+  // حاجات حساسة ما تتعادش
+  if (
+    url.includes("/api/v1/auth/me") ||
+    url.includes("/api/v1/business/me")
+  ) return false;
 
-  const url = String(
-    error.config?.url ||
-    ""
-  );
-
-  return !url.includes(
-    "/api/v1/auth/logout"
-  );
+  return true;
 }
 
-function handleResponseError(
-  error: AxiosError
-) {
-  const status =
-    error.response
-      ?.status;
+async function retryRequest(error: AxiosError): Promise<never> {
+  const config = error.config as RetryableConfig | undefined;
 
-  // ====================================================
-  // AUTO LOGOUT
-  // ====================================================
+  if (!config || !isRetryEligible(config)) return Promise.reject(error);
 
+  config.__retryCount = config.__retryCount || 0;
+
+  if (config.__retryCount >= MAX_RETRIES) return Promise.reject(error);
+
+  config.__retryCount += 1;
+
+  await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY));
+
+  const client = config.__client || qxtApiClient;
+  return client(config);
+}
+
+/* =========================================================
+   ERROR HANDLER  ← واحدة بس، صح
+========================================================= */
+
+function handleError(error: AxiosError): Promise<never> {
+  const status = error.response?.status;
+  const url    = error.config?.url || "";
+
+  // 401 على auth endpoints فقط = logout
   if (
-    shouldLogoutOn401(
-      error
+    status === 401 &&
+    (
+      url.includes("/api/v1/auth/me") ||
+      url.includes("/api/v1/auth/context")
     )
   ) {
     logoutSideEffects();
   }
 
-  // ====================================================
-  // WORKSPACE INVALID
-  // ====================================================
-
-  if (
-    status === 400
-  ) {
-    const code =
-      (
-        error.response
-          ?.data as any
-      )?.detail?.code;
-
-    if (
-      code ===
-      "WORKSPACE_REQUIRED"
-    ) {
-      console.error(
-        "[Workspace] Missing active workspace"
-      );
+  // Timeout
+  if (error.code === "ECONNABORTED") {
+    if (!url.includes("/api/v1/auth/me")) {
+      console.error("[API TIMEOUT]", url);
     }
+    return Promise.reject(error);
   }
 
-  return Promise.reject(
-    error
-  );
+  // Network error - retry
+  if (!error.response) {
+    console.error("[NETWORK ERROR]", url);
+    return retryRequest(error);
+  }
+
+  // كل الأخطاء التانية ما عدا 401 على /me
+  if (!(status === 401 && url.includes("/api/v1/auth/me"))) {
+    console.error("[API ERROR]", { status, url, data: error.response?.data });
+  }
+
+  return Promise.reject(error);
 }
 
-/* ======================================================
+/* =========================================================
    ATTACH INTERCEPTORS
-====================================================== */
+========================================================= */
 
-const clients = [
-  qxtAuthClient,
-  qxtChatClient,
-  qxtApiClient,
-];
-
-for (const client of clients) {
-  client.interceptors.request.use(
-    attachAuth
-  );
+for (const client of [qxtApiClient, qxtAuthClient, qxtChatClient]) {
+  client.interceptors.request.use((config) => {
+    const retryable = config as RetryableConfig;
+    retryable.__client = client;
+    return attachAuthHeaders(retryable);
+  });
 
   client.interceptors.response.use(
-    (response) =>
-      response,
-    handleResponseError
+    (response) => response,
+    handleError
   );
 }
 
-/* ======================================================
-   WORKSPACE BOOTSTRAP
-====================================================== */
+/* =========================================================
+   AUTH SIDE EFFECTS
+========================================================= */
 
-let workspaceBootstrapPromise:
-  | Promise<string | null>
-  | null = null;
-
-export async function ensureWorkspaceLoaded(): Promise<string | null> {
-  // ====================================================
-  // EXISTING
-  // ====================================================
-
-  const existing =
-    normalizeValue(
-      getStoredWorkspace()
-    );
-
-  if (
-    existing &&
-    isValidUuid(
-      existing
-    )
-  ) {
-    return existing;
-  }
-
-  // ====================================================
-  // TOKEN REQUIRED
-  // ====================================================
-
-  const token =
-    normalizeValue(
-      getStoredToken()
-    );
-
-  if (!token) {
-    return null;
-  }
-
-  // ====================================================
-  // DEDUPE
-  // ====================================================
-
-  if (
-    workspaceBootstrapPromise
-  ) {
-    return workspaceBootstrapPromise;
-  }
-
-  // ====================================================
-  // LOAD
-  // ====================================================
-
-  workspaceBootstrapPromise =
-    (async () => {
-      try {
-        const response =
-          await qxtChatClient.get(
-            "/api/v1/workspaces"
-          );
-
-        const raw =
-          response.data;
-
-        const workspaces =
-          raw?.items ||
-          [];
-
-        if (
-          !Array.isArray(
-            workspaces
-          ) ||
-          !workspaces.length
-        ) {
-          console.warn(
-            "[Workspace] No workspaces available"
-          );
-
-          return null;
-        }
-
-        const first =
-          workspaces[0];
-
-        const workspaceId =
-          normalizeValue(
-            String(
-              first.id
-            )
-          );
-
-        if (
-          !workspaceId ||
-          !isValidUuid(
-            workspaceId
-          )
-        ) {
-          console.error(
-            "[Workspace] Invalid workspace returned"
-          );
-
-          return null;
-        }
-
-        // ================================================
-        // ACTIVATE
-        // ================================================
-
-        try {
-          await qxtChatClient.post(
-            `/api/v1/workspaces/${workspaceId}/activate`
-          );
-        } catch (
-        activationError
-        ) {
-          console.warn(
-            "[Workspace] Activation failed",
-            activationError
-          );
-        }
-
-        applyWorkspaceEverywhere(
-          workspaceId
-        );
-
-        console.log(
-          "[Workspace] Active:",
-          workspaceId
-        );
-
-        return workspaceId;
-      } catch (error) {
-        console.error(
-          "[Workspace] Bootstrap failed",
-          error
-        );
-
-        return null;
-      } finally {
-        workspaceBootstrapPromise =
-          null;
-      }
-    })();
-
-  return workspaceBootstrapPromise;
+export function loginSideEffects(token: string): void {
+  setStoredToken(token);
+  // ✅ مش بنعمل reset للـ context - الـ workspace يتحمل بعدين
 }
 
-/* ======================================================
-   INITIAL HYDRATION
-====================================================== */
+export function logoutSideEffects(): void {
+  setStoredToken(null);
+  setStoredApiKey(null);
+  setStoredLastSession(null);  // ✅ قبل clearStoredContext
+  setStoredWorkspace(null);
+  setStoredCompany(null);
+  clearStoredContext();
+  workspacePromise = null;
+}
 
-if (
-  typeof window !==
-  "undefined"
-) {
-  const token =
-    getStoredToken();
+/* =========================================================
+   WORKSPACE BOOTSTRAP
+========================================================= */
 
-  const apiKey =
-    getStoredApiKey();
+let workspacePromise: Promise<string | null> | null = null;
 
-  const companyId =
-    getStoredCompany();
+export async function ensureWorkspaceLoaded(): Promise<string | null> {
+  const runtime = getStoredContext();
 
-  const workspaceId =
-    getStoredWorkspace();
+  // Personal space - مش محتاج workspace
+  if (runtime.spaceType === "personal") return null;
 
-  if (token) {
-    applyTokenEverywhere(
-      token
-    );
+  // عندنا workspace valid - رجعه مباشرة
+  if (runtime.workspaceId && isUuid(runtime.workspaceId)) {
+    return runtime.workspaceId;
   }
 
-  if (apiKey) {
-    setApiKeyHeader(
-      apiKey
-    );
-  }
+  // Singleton promise - امنع double fetch
+  if (workspacePromise) return workspacePromise;
 
-  if (companyId) {
-    applyCompanyEverywhere(
-      companyId
-    );
-  }
+  workspacePromise = (async () => {
+    try {
+      const response = await qxtApiClient.get("/api/v1/workspaces", {
+        timeout: 12_000,
+      });
 
-  if (workspaceId) {
-    applyWorkspaceEverywhere(
-      workspaceId
-    );
-  }
+      const raw   = response.data;
+      const items = Array.isArray(raw)
+        ? raw
+        : Array.isArray(raw?.items)
+        ? raw.items
+        : Array.isArray(raw?.data)
+        ? raw.data
+        : [];
+
+      if (!items.length) return null;
+
+      const workspaceId = normalize(String(items[0]?.id));
+      if (!workspaceId || !isUuid(workspaceId)) return null;
+
+      setStoredContext({
+        spaceType:     "workspace",
+        workspaceId,
+        activeAgentId: null,
+        companyId:     normalizeUnknownString(items[0]?.company_id) ?? getStoredCompany(),
+      });
+
+      return workspaceId;
+    } catch (error) {
+      console.error("[WORKSPACE BOOTSTRAP FAILED]", error);
+      return null;
+    } finally {
+      workspacePromise = null;
+    }
+  })();
+
+  return workspacePromise;
 }

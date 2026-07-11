@@ -1,21 +1,53 @@
-// app/qxt-chat/components/sidebar/types.ts
+export type SessionScope =
+  | "personal"
+  | "workspace";
+
+export type SessionKind =
+  | "chat"
+  | "workspace"
+  | "agent";
+
 export type SessionItem = {
-    id: string;
-    title?: string | null;
-    updated_at?: string | null;
-    created_at?: string | null;
+  id: string;
+  owner_user_id?: number;
+  title?: string | null;
+
+  kind?: SessionKind;
+  scope?: SessionScope;
+
+  workspace_id?: string | null;
+  agent_id?: string | null;
+  folder_id?: string | null;
+
+  pinned?: boolean;
+  sort_index?: number;
+
+  messages_count?: number;
+  last_message?: string | null;
+
+  is_agent_session?: boolean;
+
+  updated_at?: string | null;
+  created_at?: string | null;
+  deleted_at?: string | null;
 };
 
-export type VisionKey = "image_generator" | "design_branding" | "ocr_analysis";
+export type VisionKey =
+  | "image_generator"
+  | "design_branding"
+  | "ocr_analysis";
 
 export type ProjectFolder = {
-    id: string;
-    title: string;
-    kind?: "project" | "library" | "code" | "root";
-    sort_index?: number;
-    chats?: SessionItem[];
-    folder_id?: string | null;
+  id: string;
+  title: string;
+  kind?: "project";
+  sort_index?: number;
+  chats?: SessionItem[];
+  folder_id?: string | null;
 };
 
-// أضِف هذا السطر أسفل كل الأنواع الأخرى:
-export type SectionKey = "root" | "projects" | "library" | "code";
+export type SectionKey =
+  | "root"
+  | "projects"
+  | "library"
+  | "code";

@@ -1,29 +1,26 @@
-import { qxtChatClient } from "../core/qxtClient";
-import { API_BASE } from "../../config";
+import axios, {
+  AxiosError,
+} from "axios";
 
-/* ======================================================
+import {
+  getStoredContext,
+  qxtChatClient,
+} from "../core/qxtClient";
+
+/* =========================================================
    TYPES
-====================================================== */
+========================================================= */
 
-export type ChatMessage = {
-  id?: string;
-  role: "user" | "assistant" | "system";
-  content: string;
+export type ChatRole =
+  | "user"
+  | "assistant"
+  | "system";
 
-  images?: string[] | null;
-  videos?: string[] | null;
+export type ChatScope =
+  | "personal"
+  | "workspace";
 
-  documents?: Array<{
-    type: "document";
-    url: string;
-    name?: string;
-    size?: number;
-    mimeType?: string;
-  }> | null;
-
-  payload?: Record<string, any> | null;
-
-  kind?:
+export type MessageKind =
   | "text"
   | "image"
   | "video"
@@ -32,59 +29,57 @@ export type ChatMessage = {
   | "recording"
   | "upgrade";
 
-  audioUrl?: string;
+export type ChatAttachment = {
+  type: "document";
+  url: string;
+  name?: string;
+  size?: number;
+  mimeType?: string;
+};
 
+export type ChatMessage = {
+  id?: string;
+  role: ChatRole;
+  content: string;
+  kind?: MessageKind;
+  payload?: Record<
+    string,
+    any
+  > | null;
+  images?: string[] | null;
+  videos?: string[] | null;
+  documents?: ChatAttachment[] | null;
+  audioUrl?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
-
   edited?: boolean | null;
 };
 
 export type ChatSession = {
   id: string;
-
   title?: string | null;
-
+  scope?: ChatScope;
+  workspace_id?: string | null;
+  agent_id?: string | null;
+  folder_id?: string | null;
+  last_message?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
-
-  last_message?: string | null;
-
-  folder_id?: string | null;
-
-  workspace_id?: string | null;
-
-  scope?: "personal" | "workspace";
-};
-
-export type ChatRequest = {
-  model: string;
-  messages: ChatMessage[];
-  session_id: string;
-
-  request_id?: string;
-
-  stream?: boolean;
-
-  tools?: any[];
-  tool_choice?: any;
 };
 
 export type ChatResponse = {
   content?: string;
-
-  session_id?: string;
-
   model?: string;
-
+  session_id?: string;
   payload?: {
     images?: string[];
     files?: string[];
     videos?: string[];
   };
-
-  usage?: Record<string, any>;
-
+  usage?: Record<
+    string,
+    any
+  >;
   meta?: {
     trace_id?: string;
     request_id?: string;
@@ -95,692 +90,526 @@ export type ChatResponse = {
 
 export type StreamChunk = {
   event?: string;
-
   choices?: Array<{
     delta?: {
       content?: string;
     };
   }>;
-
   images?: string[];
-
   error?: string;
 };
 
-/* ======================================================
-   HELPERS
-====================================================== */
+/* =========================================================
+   CONSTANTS
+========================================================= */
 
-function pickArray<T = any>(v: any): T[] {
-  return Array.isArray(v) ? v : [];
-}
+const CHAT_API_PREFIX =
+  "/api/v1";
 
-function getWorkspaceId(): string {
-  return (
-    localStorage.getItem("qxt_workspace_id") ||
-    ""
-  );
-}
+/* =========================================================
+   RUNTIME CONTEXT
+========================================================= */
 
-function getWorkspaceHeaders() {
-  const workspaceId =
-    localStorage.getItem(
-      "qxt_workspace_id"
-    );
-
-  if (!workspaceId) {
-    return {};
-  }
+function getRuntimeContext() {
+  const context =
+    getStoredContext();
 
   return {
-    "X-Workspace-ID":
-      workspaceId,
+    spaceType:
+      context.spaceType,
+    workspace_id:
+      context.spaceType ===
+      "workspace"
+        ? context.workspaceId
+        : undefined,
+    agent_id:
+      context.activeAgentId ??
+      undefined,
   };
 }
 
-/* ======================================================
-   NORMALIZERS
-====================================================== */
+/* =========================================================
+   HELPERS
+========================================================= */
 
-function normalizeMessages(raw: any): ChatMessage[] {
-  try {
-    let messagesArray: any[] = [];
-
-    if (Array.isArray(raw)) {
-      messagesArray = raw;
-    } else if (raw && typeof raw === "object") {
-      messagesArray =
-        Array.isArray(raw.messages)
-          ? raw.messages
-          : Array.isArray(raw.data)
-            ? raw.data
-            : Array.isArray(raw.items)
-              ? raw.items
-              : [];
-    }
-
-    return messagesArray
-      .filter(
-        (m: any) =>
-          m &&
-          typeof m === "object" &&
-          (m.role || m.content)
-      )
-      .map((m: any) => {
-        const images = pickArray<string>(
-          m.payload?.images || m.images
-        );
-
-        const videos = pickArray<string>(
-          m.payload?.videos || m.videos
-        );
-
-        const audioUrl =
-          m.payload?.audio_url ||
-          m.audioUrl ||
-          null;
-
-        const documents = Array.isArray(
-          m.payload?.documents
-        )
-          ? m.payload.documents.map((d: any) => ({
-            type: "document" as const,
-            url:
-              d.url ||
-              d.file_url ||
-              "",
-            name:
-              d.name ||
-              d.filename ||
-              "Document",
-            size:
-              d.size || 0,
-            mimeType:
-              d.mime_type ||
-              "application/octet-stream",
-          }))
-          : [];
-
-        let kind: ChatMessage["kind"] = "text";
-
-        if (documents.length > 0) {
-          kind = "document";
-        } else if (videos.length > 0) {
-          kind = "video";
-        } else if (images.length > 0) {
-          kind = "image";
-        } else if (audioUrl) {
-          kind = "audio";
-        }
-
-        return {
-          id: m.id ? String(m.id) : undefined,
-
-          role:
-            (m.role || "user") as
-            | "user"
-            | "assistant"
-            | "system",
-
-          content:
-            typeof m.content === "string"
-              ? m.content
-              : "",
-
-          images:
-            images.length > 0
-              ? images
-              : null,
-
-          videos:
-            videos.length > 0
-              ? videos
-              : null,
-
-          documents:
-            documents.length > 0
-              ? documents
-              : null,
-
-          audioUrl:
-            audioUrl || undefined,
-
-          payload:
-            m.payload || null,
-
-          kind,
-
-          created_at:
-            m.created_at ?? null,
-
-          updated_at:
-            m.updated_at ?? null,
-
-          edited:
-            typeof m.edited === "boolean"
-              ? m.edited
-              : null,
-        };
-      });
-  } catch (err) {
-    console.error(
-      "[normalizeMessages] Error:",
-      err
-    );
-
-    return [];
-  }
+function normalizeArray<T>(
+  value: any
+): T[] {
+  return Array.isArray(value)
+    ? value
+    : [];
 }
 
-function normalizeSessions(raw: any): ChatSession[] {
-  try {
-    let sessionsArray: any[] = [];
+function parseApiError(
+  error: unknown
+): never {
+  if (
+    axios.isAxiosError(error)
+  ) {
+    const axiosError =
+      error as AxiosError<any>;
 
-    if (Array.isArray(raw)) {
-      sessionsArray = raw;
-    } else if (raw && typeof raw === "object") {
-      sessionsArray =
-        Array.isArray(raw.sessions)
-          ? raw.sessions
-          : Array.isArray(raw.data)
-            ? raw.data
-            : Array.isArray(raw.items)
-              ? raw.items
-              : [];
-    }
+    const status =
+      axiosError.response
+        ?.status;
 
-    return sessionsArray
-      .filter(
-        (s: any) =>
-          s &&
-          typeof s === "object" &&
-          s.id
-      )
-      .map((s: any) => ({
-        id: String(s.id),
+    const detail =
+      axiosError.response
+        ?.data?.detail;
 
-        title:
-          typeof s.title === "string"
-            ? s.title
-            : null,
+    const message =
+      detail?.message ||
+      detail?.code ||
+      detail ||
+      axiosError.message;
 
-        created_at:
-          s.created_at ?? null,
-
-        updated_at:
-          s.updated_at ?? null,
-
-        last_message:
-          s.last_message ?? null,
-
-        folder_id:
-          s.folder_id ?? null,
-
-        workspace_id:
-          s.workspace_id ?? null,
-
-        scope:
-          s.scope === "workspace"
-            ? "workspace"
-            : "personal",
-      }));
-  } catch (err) {
-    console.error(
-      "[normalizeSessions] Error:",
-      err
-    );
-
-    return [];
-  }
-}
-
-/* ======================================================
-   SESSIONS API
-====================================================== */
-
-export async function listSessions(): Promise<ChatSession[]> {
-  try {
-    const res = await qxtChatClient.get(
-      "/api/v1/sessions",
-      {
-        headers:
-          getWorkspaceHeaders(),
-      }
-    );
-
-    return normalizeSessions(
-      res.data
-    );
-  } catch (err) {
-    console.error(
-      "[listSessions] Failed:",
-      err
-    );
-
-    return [];
-  }
-}
-
-export async function createSession(payload?: {
-  title?: string;
-  folder_id?: string | null;
-  workspace_chat?: boolean;
-}): Promise<{ id: string }> {
-  try {
-    const res = await qxtChatClient.post(
-      "/api/v1/sessions",
-      {
-        title:
-          payload?.title?.trim() || null,
-
-        folder_id:
-          payload?.folder_id ?? null,
-
-        workspace_chat:
-          payload?.workspace_chat ?? false,
-      },
-      {
-        headers:
-          getWorkspaceHeaders(),
-      }
-    );
-
-    const id = res.data?.id;
-
-    if (!id || typeof id !== "string") {
+    if (status === 400) {
       throw new Error(
-        "Invalid session ID"
+        typeof message ===
+          "string"
+          ? message
+          : "Bad request"
       );
     }
 
-    return { id };
-  } catch (err: any) {
-    console.error(
-      "[createSession] Failed:",
-      err?.response?.data || err
+    if (status === 401) {
+      throw new Error(
+        "Unauthorized"
+      );
+    }
+
+    if (status === 403) {
+      throw new Error(
+        "Forbidden"
+      );
+    }
+
+    if (status === 404) {
+      throw new Error(
+        "Not found"
+      );
+    }
+
+    if (status === 409) {
+      throw new Error(
+        "Already processing"
+      );
+    }
+
+    if (status === 422) {
+      throw new Error(
+        "Invalid session payload"
+      );
+    }
+
+    if (status === 429) {
+      throw new Error(
+        "Rate limit exceeded"
+      );
+    }
+
+    if (status === 503) {
+      throw new Error(
+        "System overloaded"
+      );
+    }
+
+    throw new Error(
+      message ||
+        "API request failed"
+    );
+  }
+
+  throw error;
+}
+
+/* =========================================================
+   NORMALIZERS
+========================================================= */
+
+function normalizeMessage(
+  raw: any
+): ChatMessage {
+  const images =
+    normalizeArray<string>(
+      raw?.payload?.images ||
+        raw?.images
     );
 
-    throw err;
+  const videos =
+    normalizeArray<string>(
+      raw?.payload?.videos ||
+        raw?.videos
+    );
+
+  const documents =
+    Array.isArray(
+      raw?.payload?.documents
+    )
+      ? raw.payload.documents.map(
+          (doc: any) => ({
+            type:
+              "document" as const,
+            url:
+              doc.url ||
+              doc.file_url ||
+              "",
+            name:
+              doc.name ||
+              doc.filename ||
+              "Document",
+            size:
+              doc.size || 0,
+            mimeType:
+              doc.mime_type ||
+              "application/octet-stream",
+          })
+        )
+      : [];
+
+  const audioUrl =
+    raw?.payload?.audio_url ||
+    raw?.audioUrl ||
+    null;
+
+  let kind: MessageKind =
+    "text";
+
+  if (documents.length > 0) {
+    kind = "document";
+  } else if (
+    videos.length > 0
+  ) {
+    kind = "video";
+  } else if (
+    images.length > 0
+  ) {
+    kind = "image";
+  } else if (audioUrl) {
+    kind = "audio";
+  }
+
+  return {
+    id: raw?.id
+      ? String(raw.id)
+      : undefined,
+    role:
+      raw?.role || "user",
+    content:
+      typeof raw?.content ===
+      "string"
+        ? raw.content
+        : "",
+    payload:
+      raw?.payload || null,
+    images:
+      images.length > 0
+        ? images
+        : null,
+    videos:
+      videos.length > 0
+        ? videos
+        : null,
+    documents:
+      documents.length > 0
+        ? documents
+        : null,
+    audioUrl,
+    kind,
+    created_at:
+      raw?.created_at ??
+      null,
+    updated_at:
+      raw?.updated_at ??
+      null,
+    edited:
+      typeof raw?.edited ===
+      "boolean"
+        ? raw.edited
+        : null,
+  };
+}
+
+function normalizeMessages(
+  raw: any
+): ChatMessage[] {
+  const source =
+    Array.isArray(raw)
+      ? raw
+      : Array.isArray(
+            raw?.items
+          )
+        ? raw.items
+        : Array.isArray(
+              raw?.messages
+            )
+          ? raw.messages
+          : Array.isArray(
+                raw?.data
+              )
+            ? raw.data
+            : [];
+
+  return source
+    .filter(Boolean)
+    .map(normalizeMessage);
+}
+
+function normalizeSession(
+  raw: any
+): ChatSession {
+  const scope: ChatScope =
+    raw?.workspace_id
+      ? "workspace"
+      : "personal";
+
+  return {
+    id: String(raw.id),
+    title:
+      raw.title || null,
+    scope,
+    workspace_id:
+      raw.workspace_id ||
+      null,
+    agent_id:
+      raw.agent_id ||
+      null,
+    folder_id:
+      raw.folder_id ||
+      null,
+    last_message:
+      raw.last_message ||
+      null,
+    created_at:
+      raw.created_at ||
+      null,
+    updated_at:
+      raw.updated_at ||
+      null,
+  };
+}
+
+function normalizeSessions(
+  raw: any
+): ChatSession[] {
+  const source =
+    Array.isArray(raw)
+      ? raw
+      : Array.isArray(
+            raw?.items
+          )
+        ? raw.items
+        : Array.isArray(
+              raw?.sessions
+            )
+          ? raw.sessions
+          : Array.isArray(
+                raw?.data
+              )
+            ? raw.data
+            : [];
+
+  return source
+    .filter(Boolean)
+    .map(normalizeSession);
+}
+
+/* =========================================================
+   SESSION HELPERS
+========================================================= */
+
+function buildSessionParams() {
+  const runtime =
+    getRuntimeContext();
+
+  const params: Record<
+    string,
+    string
+  > = {};
+
+  if (runtime.agent_id) {
+    params.kind = "agent";
+    params.agent_id =
+      runtime.agent_id;
+
+    if (runtime.workspace_id) {
+      params.workspace_id =
+        runtime.workspace_id;
+    }
+
+    return params;
+  }
+
+  if (
+    runtime.spaceType ===
+    "workspace"
+  ) {
+    params.kind =
+      "workspace";
+
+    if (runtime.workspace_id) {
+      params.workspace_id =
+        runtime.workspace_id;
+    }
+
+    return params;
+  }
+
+  params.kind = "chat";
+  return params;
+}
+
+function buildCreatePayload(
+  payload?: {
+    title?: string;
+    folder_id?: string | null;
+  }
+) {
+  const runtime =
+    getRuntimeContext();
+
+  const body: Record<
+    string,
+    any
+  > = {
+    title:
+      payload?.title?.trim() ||
+      null,
+    folder_id:
+      payload?.folder_id ??
+      null,
+  };
+
+  if (runtime.agent_id) {
+    body.kind = "agent";
+    body.agent_id =
+      runtime.agent_id;
+
+    if (runtime.workspace_id) {
+      body.workspace_id =
+        runtime.workspace_id;
+    }
+
+    return body;
+  }
+
+  if (
+    runtime.spaceType ===
+      "workspace" &&
+    runtime.workspace_id
+  ) {
+    body.kind =
+      "workspace";
+    body.workspace_id =
+      runtime.workspace_id;
+
+    return body;
+  }
+
+  body.kind = "chat";
+  return body;
+}
+
+/* =========================================================
+   SESSIONS
+========================================================= */
+
+export async function listSessions() {
+  try {
+    const response =
+      await qxtChatClient.get(
+        `${CHAT_API_PREFIX}/sessions`,
+        {
+          params:
+            buildSessionParams(),
+        }
+      );
+
+    return normalizeSessions(
+      response.data
+    );
+  } catch (error) {
+    console.error(
+      "[listSessions]",
+      error
+    );
+
+    return [];
+  }
+}
+
+export async function createSession(
+  payload?: {
+    title?: string;
+    folder_id?: string | null;
+  }
+): Promise<ChatSession> {
+  try {
+    const response =
+      await qxtChatClient.post(
+        `${CHAT_API_PREFIX}/sessions`,
+        buildCreatePayload(
+          payload
+        )
+      );
+
+    return normalizeSession(
+      response.data
+    );
+  } catch (error) {
+    console.error(
+      "[createSession]",
+      error
+    );
+
+    parseApiError(error);
   }
 }
 
 export async function getSessionMessages(
   sessionId: string
-): Promise<ChatMessage[]> {
-  if (!sessionId) {
-    throw new Error(
-      "Missing sessionId"
-    );
-  }
-
+): Promise<
+  ChatMessage[]
+> {
   try {
-    const res =
+    const response =
       await qxtChatClient.get(
-        `/api/v1/sessions/${sessionId}/messages`,
-        {
-          headers:
-            getWorkspaceHeaders(),
-        }
+        `${CHAT_API_PREFIX}/sessions/${sessionId}/messages`
       );
 
     return normalizeMessages(
-      res.data
+      response.data
     );
-  } catch (err: any) {
+  } catch (error: any) {
     if (
-      err?.response?.status === 404
+      error?.response?.status ===
+      404
     ) {
       return [];
     }
 
     console.error(
-      "[getSessionMessages] Failed:",
-      err
+      "[getSessionMessages]",
+      error
     );
 
-    throw err;
+    parseApiError(error);
   }
 }
 
 export async function deleteSession(
   sessionId: string
 ): Promise<void> {
-  if (!sessionId) {
-    throw new Error(
-      "Missing sessionId"
-    );
-  }
-
   try {
     await qxtChatClient.delete(
-      `/api/v1/sessions/${sessionId}`,
-      {
-        headers:
-          getWorkspaceHeaders(),
-      }
+      `${CHAT_API_PREFIX}/sessions/${sessionId}`
     );
-  } catch (err) {
+  } catch (error) {
     console.error(
-      "[deleteSession] Failed:",
-      err
+      "[deleteSession]",
+      error
     );
 
-    throw err;
+    parseApiError(error);
   }
-}
-
-export async function renameSession(
-  sessionId: string,
-  newTitle: string
-): Promise<void> {
-  if (!sessionId) {
-    throw new Error(
-      "Missing sessionId"
-    );
-  }
-
-  if (!newTitle?.trim()) {
-    throw new Error(
-      "Title cannot be empty"
-    );
-  }
-
-  try {
-    await qxtChatClient.patch(
-      `/api/v1/sessions/${sessionId}/rename`,
-      {
-        title: newTitle.trim(),
-      },
-      {
-        headers: getWorkspaceHeaders(),
-      }
-    );
-  } catch (err) {
-    throw err;
-  }
-}
-
-/* ======================================================
-   CHAT API
-====================================================== */
-
-export async function sendChatMessage(
-  sessionId: string,
-  userMessage: string,
-  model: string = "pulse",
-  requestId?: string
-): Promise<ChatResponse> {
-  if (!sessionId) {
-    throw new Error(
-      "Session ID is required"
-    );
-  }
-
-  if (!userMessage?.trim()) {
-    throw new Error(
-      "Message cannot be empty"
-    );
-  }
-
-  const finalRequestId =
-    requestId ||
-    crypto.randomUUID();
-
-  try {
-    const res =
-      await qxtChatClient.post(
-        "/api/v1/chat/completions",
-        {
-          model,
-
-          session_id:
-            sessionId,
-
-          request_id:
-            finalRequestId,
-
-          messages: [
-            {
-              role: "user",
-              content:
-                userMessage.trim(),
-            },
-          ],
-
-          stream: false,
-        },
-        {
-          headers:
-            getWorkspaceHeaders(),
-        }
-      );
-
-    return {
-      content:
-        res.data?.content || "",
-
-      session_id:
-        res.data?.session_id,
-
-      model:
-        res.data?.model || model,
-
-      payload:
-        res.data?.payload,
-
-      usage:
-        res.data?.usage,
-
-      meta:
-        res.data?.meta,
-    };
-  } catch (err) {
-    console.error(
-      "[sendChatMessage] Failed:",
-      err
-    );
-
-    throw err;
-  }
-}
-
-/* ======================================================
-   STREAMING
-====================================================== */
-
-export async function* streamChatMessage(
-  sessionId: string,
-  userMessage: string,
-  model: string = "pulse",
-  requestId?: string
-): AsyncGenerator<string, void, unknown> {
-  if (!sessionId) {
-    throw new Error(
-      "Session ID is required"
-    );
-  }
-
-  if (!userMessage?.trim()) {
-    throw new Error(
-      "Message cannot be empty"
-    );
-  }
-
-  const finalRequestId =
-    requestId ||
-    crypto.randomUUID();
-
-  const token =
-    localStorage.getItem(
-      "qxt_access_token"
-    ) || "";
-
-  const workspaceId =
-    getWorkspaceId();
-
-  try {
-    const response = await fetch(
-      `${API_BASE}/api/v1/chat/completions`,
-      {
-        method: "POST",
-
-        headers: {
-          "Content-Type":
-            "application/json",
-
-          ...(token
-            ? {
-              Authorization:
-                `Bearer ${token}`,
-            }
-            : {}),
-
-          ...(workspaceId
-            ? {
-              "X-Workspace-ID":
-                workspaceId,
-            }
-            : {}),
-        },
-
-        body: JSON.stringify({
-          model,
-
-          session_id:
-            sessionId,
-
-          request_id:
-            finalRequestId,
-
-          stream: true,
-
-          messages: [
-            {
-              role: "user",
-              content:
-                userMessage.trim(),
-            },
-          ],
-        }),
-      }
-    );
-
-    if (!response.ok) {
-      throw new Error(
-        `Stream failed: ${response.status}`
-      );
-    }
-
-    const reader =
-      response.body?.getReader();
-
-    const decoder =
-      new TextDecoder();
-
-    if (!reader) {
-      throw new Error(
-        "No stream reader"
-      );
-    }
-
-    let buffer = "";
-
-    while (true) {
-      const {
-        done,
-        value,
-      } = await reader.read();
-
-      if (done) break;
-
-      buffer += decoder.decode(
-        value,
-        {
-          stream: true,
-        }
-      );
-
-      const lines =
-        buffer.split("\n");
-
-      buffer =
-        lines.pop() || "";
-
-      for (const line of lines) {
-        if (
-          !line.startsWith(
-            "data: "
-          )
-        ) {
-          continue;
-        }
-
-        const data =
-          line.slice(6);
-
-        if (data === "[DONE]") {
-          return;
-        }
-
-        try {
-          const chunk =
-            JSON.parse(data);
-
-          if (
-            chunk.choices?.[0]
-              ?.delta?.content
-          ) {
-            yield chunk
-              .choices[0]
-              .delta.content;
-          }
-
-          if (chunk.images) {
-            yield `[IMAGES:${chunk.images.join(",")}]`;
-          }
-        } catch (e) {
-          console.warn(
-            "[streamChatMessage] Parse error:",
-            data
-          );
-        }
-      }
-    }
-  } catch (err) {
-    console.error(
-      "[streamChatMessage] Failed:",
-      err
-    );
-
-    throw err;
-  }
-}
-
-/* ======================================================
-   UTIL
-====================================================== */
-
-export async function sendMessageAndRefresh(
-  sessionId: string,
-  userMessage: string,
-  model: string = "pulse"
-) {
-  const response =
-    await sendChatMessage(
-      sessionId,
-      userMessage,
-      model
-    );
-
-  const messages =
-    await getSessionMessages(
-      sessionId
-    );
-
-  return {
-    response:
-      response.content || "",
-
-    messages,
-  };
 }

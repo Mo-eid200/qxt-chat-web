@@ -970,7 +970,7 @@ function ChatMessagesComponent({
 
       {pendingStage && (
         <div className="flex justify-start animate-in fade-in slide-in-from-bottom-3 duration-300">
-          <AIStatus stage={pendingStage} history={stageHistory} showProgress={true} />
+          <AIStatus stage={pendingStage} history={stageHistory} />
         </div>
       )}
 

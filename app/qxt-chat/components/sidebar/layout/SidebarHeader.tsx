@@ -1,168 +1,88 @@
 "use client";
 
 import React from "react";
-import { X } from "lucide-react";
+import Image from "next/image";
+import { PanelLeft, Search, X } from "lucide-react";
 
-import { cn } from "../utils/cn";
-
-type SidebarHeaderProps = {
-    open: boolean;
-
-    collapsed: boolean;
-
-    darkMode: boolean;
-
-    onCloseAction?: () => void;
-
-    onAccountClickAction?: () => void;
-
-    avatarLetter: string;
-    displayName: string;
-    subText: string;
+export type SidebarHeaderProps = {
+  open: boolean;
+  onCloseAction?: () => void;
+  collapsed: boolean;
+  darkMode: boolean;
+  onToggleCollapse: () => void;
 };
 
 export function SidebarHeader({
-    collapsed,
-    avatarLetter,
-    displayName,
-    subText,
-    darkMode,
-    onAccountClickAction,
-    onCloseAction,
+  open,
+  onCloseAction,
+  collapsed,
+  darkMode,
+  onToggleCollapse,
 }: SidebarHeaderProps) {
+  if (collapsed) {
     return (
-        <div
-            className={cn(
-                `
-                relative
-                flex items-center justify-between
-                px-3 py-3
-                border-b
-                backdrop-blur-2xl
-                transition-all duration-300
-                `,
-                darkMode
-                    ? `
-                      border-white/[0.05]
-                      bg-[#060816]/80
-                    `
-                    : `
-                      border-black/[0.05]
-                      bg-white/70
-                    `
-            )}
+      <div className="flex flex-col items-center gap-2 px-2 py-4">
+        <button
+          type="button"
+          onClick={onToggleCollapse}
+          title="Expand sidebar"
+          className="group relative flex h-11 w-11 items-center justify-center rounded-lg transition-all hover:bg-white/[0.06]"
         >
-            {/* Account */}
-            <button
-                type="button"
-                onClick={onAccountClickAction}
-                className={cn(
-                    `
-                    group
-                    flex items-center
-                    min-w-0
-                    transition-all duration-200
-                    `,
-                    collapsed
-                        ? "justify-center w-full"
-                        : "gap-3"
-                )}
-            >
-                {/* Avatar */}
-                <div
-                    className={cn(
-                        `
-                        relative
-                        flex h-10 w-10 shrink-0
-                        items-center justify-center
-                        rounded-2xl
-                        text-[12px] font-semibold text-white
-                        transition-all duration-300
-                        `,
-                        darkMode
-                            ? `
-                              bg-gradient-to-br
-                              from-cyan-400
-                              via-blue-500
-                              to-emerald-500
+          {/* Logo — visible by default, fades out on hover */}
+          <span className="absolute inset-0 flex items-center justify-center opacity-100 transition-opacity duration-150 group-hover:opacity-0">
+            <Image
+              src="/chatqxt.png"
+              alt="ChatQXT"
+              width={60}
+              height={60}
+              className="rounded-md object-contain"
+            />
+          </span>
 
-                              shadow-[0_10px_30px_rgba(6,182,212,0.22)]
-                            `
-                            : `
-                              bg-gradient-to-br
-                              from-sky-500
-                              to-cyan-500
-                            `
-                    )}
-                >
-                    {avatarLetter.toUpperCase()}
-                </div>
-
-                {/* User Info */}
-                {!collapsed && (
-                    <div className="min-w-0 flex-1 text-left">
-                        <div
-                            className={cn(
-                                `
-                                truncate
-                                text-[13px]
-                                font-semibold
-                                tracking-[-0.01em]
-                                `,
-                                darkMode
-                                    ? "text-white/92"
-                                    : "text-slate-900"
-                            )}
-                        >
-                            {displayName}
-                        </div>
-
-                        <div
-                            className={cn(
-                                `
-                                truncate
-                                text-[11px]
-                                `,
-                                darkMode
-                                    ? "text-white/40"
-                                    : "text-slate-500"
-                            )}
-                        >
-                            {subText}
-                        </div>
-                    </div>
-                )}
-            </button>
-
-            {/* Mobile Close */}
-                        <button
-                                onClick={onCloseAction}
-                                type="button"
-                                aria-label="Close sidebar"
-                                className={cn(
-                                        `
-                                        md:hidden
-                                        flex h-9 w-9 shrink-0
-                                        items-center justify-center
-                                        rounded-xl
-                                        transition-all duration-200
-                                        `,
-                                        darkMode
-                                                ? `
-                                                    bg-white/[0.04]
-                                                    text-white/65
-                                                    hover:bg-white/[0.08]
-                                                    hover:text-white
-                                                `
-                                                : `
-                                                    bg-black/[0.04]
-                                                    text-slate-700
-                                                    hover:bg-black/[0.08]
-                                                `
-                                )}
-                        >
-                                <X className="h-4 w-4" />
-                        </button>
-        </div>
+          {/* Expand icon — hidden by default, fades in on hover */}
+          <PanelLeft className="absolute h-5 w-5 text-white/70 opacity-0 transition-opacity duration-150 group-hover:opacity-100" />
+        </button>
+      </div>
     );
+  }
+
+  return (
+    <div className="flex items-center justify-between px-4 py-4">
+      <div className="flex items-center gap-2.5">
+        <span className="text-[17px] tracking-tight text-white/95">
+          Chat<span className="font-bold text-white">QXT</span>
+        </span>
+      </div>
+
+      <div className="ml-auto flex items-center gap-1">
+        <button
+          type="button"
+          className="flex h-7 w-7 items-center justify-center rounded-lg text-white/40 transition-all hover:bg-white/[0.06] hover:text-white/70"
+          title="Search"
+        >
+          <Search className="h-4 w-4" />
+        </button>
+
+        <button
+          type="button"
+          onClick={onToggleCollapse}
+          className="flex h-7 w-7 items-center justify-center rounded-lg text-white/40 transition-all hover:bg-white/[0.06] hover:text-white/70"
+          title="Collapse sidebar"
+        >
+          <PanelLeft className="h-4 w-4" />
+        </button>
+
+        {onCloseAction && (
+          <button
+            type="button"
+            onClick={onCloseAction}
+            className="flex h-7 w-7 items-center justify-center rounded-lg text-white/40 transition-all hover:bg-white/[0.06] hover:text-white/70 md:hidden"
+            title="Close"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        )}
+      </div>
+    </div>
+  );
 }

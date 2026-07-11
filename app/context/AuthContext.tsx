@@ -1,162 +1,153 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import axios from "axios";
 
 import {
-  qxtAuthClient,
-  qxtApiClient,
-  setApiKeyHeader,
+  getStoredToken,
   loginSideEffects,
   logoutSideEffects,
-  getStoredToken,
-} from "../lib/api/core/qxtClient";
-/* =======================
-   Types
-======================= */
+  pickTokenFromResponse,
+} from "../lib/api/auth/auth.helpers";
 
-export type AuthUser = {
-  id?: number | string;
-  email: string;
-  full_name?: string | null;
-  company_id?: number | null;
-};
+import {
+  fetchMe,
+  fetchMyApiKey,
+  apiLogin,
+  apiRegister,
+  invalidateAuthCache,
+} from "../lib/api/auth/auth.api";
 
-type AuthContextValue = {
-  user: AuthUser | null;
-  loadingUser: boolean;
+import type { AuthUser, AuthContextValue } from "../lib/api/auth/auth.types";
 
-  login: (email: string, password: string) => Promise<void>;
-  register: (email: string, password: string) => Promise<void>;
-  logout: () => void;
-
-  // ✅ OAuth / callback support
-  setAuthFromToken: (token: string) => Promise<void>;
-
-  // ✅ used by callback page (me + api keys)
-  refreshMeAndKeys: () => Promise<void>;
-
-  // optional: expose current api key if you want
-  apiKey: string | null;
-};
+// ─── Context ──────────────────────────────────────────────────────────────────
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-/* =======================
-   Helpers
-======================= */
-
-async function fetchMe(): Promise<AuthUser> {
-  const res = await qxtAuthClient.get("/api/v1/auth/me");
-  // backend might return {user: ...} or user directly
-  return res.data?.user ?? res.data;
-}
-
-// حاول تجيب API Key للشركة (لو endpoint موجود)
-// لو مش موجود، هيفشل silently ومش هيكسر أي حاجة
-async function fetchMyApiKey(): Promise<string | null> {
-  try {
-    // ✅ غيّر ده لو endpoint عندك مختلف
-    // شائع: /api/v1/api-keys or /api/v1/api-keys/me
-    const res = await qxtApiClient.get("/api/v1/api-keys");
-    const arr = Array.isArray(res.data?.items) ? res.data.items : Array.isArray(res.data) ? res.data : [];
-    const first = arr.find((k: any) => k?.key || k?.value || k?.api_key_value) ?? null;
-    const key = first?.key || first?.value || first?.api_key_value || null;
-    return key ? String(key) : null;
-  } catch {
-    return null;
-  }
-}
-
-function pickTokenFromResponse(data: any): string {
-  return (
-    data?.access_token ||
-    data?.token ||
-    data?.jwt ||
-    data?.data?.access_token ||
-    ""
-  );
-}
-
-/* =======================
-   Provider
-======================= */
+// ─── Provider ─────────────────────────────────────────────────────────────────
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [apiKey, setApiKey] = useState<string | null>(null);
   const [loadingUser, setLoadingUser] = useState(true);
 
-  // ✅ Load session on boot (production stable)
+  const mountedRef = useRef(true);
+  const bootRef = useRef(false);
+
   useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
+  // ── Boot: restore session from stored token ──────────────────────────────
+  useEffect(() => {
+    if (bootRef.current) return;
+    bootRef.current = true;
+
     const token = getStoredToken();
 
     if (!token) {
-      // ensure clean state
       logoutSideEffects();
-      setApiKey(null);
-      setUser(null);
-      setLoadingUser(false);
+      if (mountedRef.current) {
+        setUser(null);
+        setApiKey(null);
+        setLoadingUser(false);
+      }
       return;
     }
 
-    // attach JWT everywhere
     loginSideEffects(token);
+
+    let cancelled = false;
 
     (async () => {
       try {
+        // fetchMe uses cache — safe to call freely
         const me = await fetchMe();
+        if (cancelled || !mountedRef.current) return;
         setUser(me);
+        setLoadingUser(false);
 
         const k = await fetchMyApiKey();
+        if (cancelled || !mountedRef.current) return;
         setApiKey(k);
-        setApiKeyHeader(k);
-      } catch {
-        // token invalid / expired
-        logoutSideEffects();
-        setApiKey(null);
-        setUser(null);
-      } finally {
+      } catch (error: any) {
+        if (cancelled || !mountedRef.current) return;
+
+        if (axios.isAxiosError(error) && error.response?.status === 401) {
+          logoutSideEffects();
+          invalidateAuthCache();
+          setUser(null);
+          setApiKey(null);
+        } else {
+          // Network / transient error — don't kill the session
+          setUser(null);
+          setApiKey(null);
+        }
+
         setLoadingUser(false);
       }
     })();
+
+    return () => { cancelled = true; };
   }, []);
 
-  // ✅ One function that refreshes everything (used by OAuth callback too)
+  // ── Shared helpers ────────────────────────────────────────────────────────
+
   async function refreshMeAndKeys() {
-    const me = await fetchMe();
+    // force=true bypasses cache (explicit refresh)
+    const me = await fetchMe(true);
+    if (!mountedRef.current) return;
     setUser(me);
 
-    const k = await fetchMyApiKey();
+    const k = await fetchMyApiKey(true);
+    if (!mountedRef.current) return;
     setApiKey(k);
-    setApiKeyHeader(k);
   }
 
-  // ✅ OAuth callback: token comes from URL
   async function setAuthFromToken(token: string) {
     if (!token) throw new Error("Missing token");
 
-    // store + attach Authorization everywhere
-    loginSideEffects(token);
+    await loginSideEffects(token);
+    if (mountedRef.current) setLoadingUser(true);
 
-    // now load user + api keys
-    await refreshMeAndKeys();
+    try {
+      await refreshMeAndKeys();
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 401) {
+        await logoutSideEffects();
+        invalidateAuthCache();
+        if (mountedRef.current) {
+          setUser(null);
+          setApiKey(null);
+        }
+      }
+      throw error;
+    } finally {
+      if (mountedRef.current) setLoadingUser(false);
+    }
   }
 
   async function login(email: string, password: string) {
-    const res = await qxtAuthClient.post("/api/v1/auth/login", { email, password });
-    const token = pickTokenFromResponse(res.data);
-
+    const data = await apiLogin(email, password);
+    const token = pickTokenFromResponse(data);
     if (!token) throw new Error("No access token returned from backend");
-
     await setAuthFromToken(token);
   }
 
   async function register(email: string, password: string) {
-    const res = await qxtAuthClient.post("/api/v1/auth/register", { email, password });
-    const token = pickTokenFromResponse(res.data);
+    const data = await apiRegister(email, password);
+    const token = pickTokenFromResponse(data);
 
-    // لو register بيرجع user بس → اعمل login
     if (!token) {
+      // Some backends don't return token on register — fall back to login
       await login(email, password);
       return;
     }
@@ -166,9 +157,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   function logout() {
     logoutSideEffects();
-    setApiKey(null);
-    setUser(null);
+    invalidateAuthCache();
+    if (mountedRef.current) {
+      setUser(null);
+      setApiKey(null);
+      setLoadingUser(false);
+    }
   }
+
+  // ── Value ─────────────────────────────────────────────────────────────────
 
   const value = useMemo<AuthContextValue>(
     () => ({
@@ -187,12 +184,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
-/* =======================
-   Hook
-======================= */
+// ─── Hook ─────────────────────────────────────────────────────────────────────
 
 export function useAuth() {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error("useAuth must be used within AuthProvider");
   return ctx;
-}   
+}

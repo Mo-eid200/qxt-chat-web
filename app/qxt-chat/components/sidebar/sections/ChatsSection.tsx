@@ -1,262 +1,275 @@
-import React from "react";
-import { MessageSquare, MoreHorizontal, GripVertical, Check, Pencil, Trash2, Link as LinkIcon } from "lucide-react";
+import React, { useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import {
+  MoreHorizontal,
+  GripVertical,
+} from "lucide-react";
+
 import type { SessionItem } from "../types";
 import { cn } from "../utils/cn";
 import { safeTitle } from "../utils/safeTitle";
-import { SectionHeader } from "../items/SectionHeader";
+import { SessionMenu } from "../items/SessionMenu";
+
+type SessionMenuState =
+  | { type: "session"; sid: string }
+  | { type: "search" }
+  | null;
 
 export type ChatsSectionProps = {
-    collapsed?: boolean;
-    isLoggedIn: boolean;
-    L: Record<string, string>;
-    rootList: SessionItem[];
-    activeSessionId: string | null;
-    onOpenSession?: (sid: string) => void;
-    onDeleteSession?: (sid: string) => void;
-    onRenameSession?: (sid: string) => void;
-    onCopySessionLink?: (sid: string) => void;
-    copiedSid: string | null;
-    menu: { type: "session"; sid: string } | { type: "search" } | null;
-    setMenu: (m: any) => void;
-    sessionMenuRef: React.RefObject<HTMLDivElement | null>;
-    q: string;
-    rowActive: string;
-    rowHover: string;
-    darkMode: boolean;
-    iconBtn: string;
-    iconTheme: string;
-    menuItem: string;
-    // If you want to support these in the future just uncomment:
-    // onNewChat?: () => void;
-    // onNewChatInFolder?: (folderId: string | null) => void;
+  collapsed?: boolean;
+  isLoggedIn: boolean;
+  L: Record<string, string>;
+  rootList: SessionItem[];
+  activeSessionId: string | null;
+  onOpenSession?: (sid: string) => void;
+  onDeleteSession?: (sid: string) => void;
+  onRenameSession?: (sid: string) => void;
+  onCopySessionLink?: (sid: string) => void;
+  copiedSid: string | null;
+  menu: SessionMenuState;
+  setMenu: (m: SessionMenuState) => void;
+  sessionMenuRef: React.RefObject<HTMLDivElement | null>;
+  q: string;
+  rowActive: string;
+  rowHover: string;
+  darkMode: boolean;
+  iconBtn: string;
+  iconTheme: string;
+  menuItem: string;
+  onNewChat?: () => void;
 };
 
 export function ChatsSection({
-    isLoggedIn,
-    L,
-    rootList,
-    activeSessionId,
-    onOpenSession,
-    onDeleteSession,
-    onRenameSession,
-    onCopySessionLink,
-    copiedSid,
-    menu,
-    setMenu,
-    sessionMenuRef,
-    q,
-    rowActive,
-    rowHover,
-    darkMode,
-    iconBtn,
-    iconTheme,
-    menuItem,
+  isLoggedIn,
+  L,
+  rootList,
+  activeSessionId,
+  onOpenSession,
+  onDeleteSession,
+  onRenameSession,
+  onCopySessionLink,
+  copiedSid,
+  setMenu,
+  menu,
+  sessionMenuRef,
+  q,
+  rowActive,
+  rowHover,
+  darkMode,
+  iconBtn,
+  iconTheme,
+  menuItem,
 }: ChatsSectionProps) {
-    return (
-        <section>
-            <SectionHeader
-                sectionKey="root"
-                title={L.chats}
-                IconOpen={MessageSquare}
-                IconClosed={MessageSquare}
-                isOpen={true}
-                dropOn={false}
-                workspaceBusy={false}
-                L={L}
-                setSectionsOpen={() => { }}
-                setDropSectionOver={() => { }}
-                setDraggingId={() => { }}
-                setDropOverId={() => { }}
-                setDropProjectOver={() => { }}
-                darkMode={darkMode}
-                rowBase=""
-                rowHover={rowHover}
-                sectionAccent={() => ""}
+  const emptyBoxClass = cn(
+    "rounded-lg border px-3 py-2.5 text-[12px] leading-5",
+    darkMode
+      ? "border-white/[0.06] bg-white/[0.02] text-white/55"
+      : "border-black/[0.06] bg-black/[0.02] text-slate-500"
+  );
+
+  return (
+    <section className="space-y-1">
+      <div className="space-y-0.5">
+        {!isLoggedIn ? (
+          <div className={emptyBoxClass}>
+            {L.signInToView}
+          </div>
+        ) : rootList.length === 0 ? (
+          <div className={emptyBoxClass}>
+            {q ? L.noResults : L.noSessions}
+          </div>
+        ) : (
+          rootList.map((s) => (
+            <RootSessionRow
+              key={s.id}
+              s={s}
+              active={activeSessionId === s.id}
+              darkMode={darkMode}
+              rowActive={rowActive}
+              rowHover={rowHover}
+              onOpenSession={onOpenSession}
+              onRenameSession={onRenameSession}
+              onDeleteSession={onDeleteSession}
+              onCopySessionLink={onCopySessionLink}
+              copiedSid={copiedSid}
+              setMenu={setMenu}
+              menu={menu}
+              sessionMenuRef={sessionMenuRef}
+              iconBtn={iconBtn}
+              iconTheme={iconTheme}
+              menuItem={menuItem}
+              L={L}
             />
-            <div className="mt-1 pl-6 pr-1 space-y-1">
-                {!isLoggedIn ? (
-                    <div
-                        className={cn(
-                            "px-2 py-2 rounded-lg text-[12px]",
-                            darkMode
-                                ? "text-emerald-300/70 bg-black/20"
-                                : "text-cyan-100/70 bg-black/10"
-                        )}
-                    >
-                        {L.signInToView}
-                    </div>
-                ) : rootList.length === 0 ? (
-                    <div
-                        className={cn(
-                            "px-2 py-2 rounded-lg text-[12px]",
-                            darkMode
-                                ? "text-emerald-300/70 bg-black/20"
-                                : "text-cyan-100/70 bg-black/10"
-                        )}
-                    >
-                        {q ? L.noResults : L.noSessions}
-                    </div>
-                ) : (
-                    rootList.map((s) => (
-                        <SessionRow
-                            key={s.id}
-                            s={s}
-                            active={activeSessionId === s.id}
-                            darkMode={darkMode}
-                            rowActive={rowActive}
-                            rowHover={rowHover}
-                            onOpenSession={onOpenSession}
-                            onRenameSession={onRenameSession}
-                            onDeleteSession={onDeleteSession}
-                            onCopySessionLink={onCopySessionLink}
-                            copiedSid={copiedSid}
-                            setMenu={setMenu}
-                            menu={menu}
-                            sessionMenuRef={sessionMenuRef}
-                            iconBtn={iconBtn}
-                            iconTheme={iconTheme}
-                            menuItem={menuItem}
-                            L={L}
-                        />
-                    ))
-                )}
-            </div>
-        </section>
-    );
+          ))
+        )}
+      </div>
+    </section>
+  );
 }
 
-type SessionRowProps = {
-    s: SessionItem;
-    active: boolean;
-    darkMode: boolean;
-    rowActive: string;
-    rowHover: string;
-    onOpenSession?: (sid: string) => void;
-    onRenameSession?: (sid: string) => void;
-    onDeleteSession?: (sid: string) => void;
-    onCopySessionLink?: (sid: string) => void;
-    copiedSid: string | null;
-    setMenu: (m: any) => void;
-    menu: { type: "session"; sid: string } | { type: "search" } | null;
-    sessionMenuRef: React.RefObject<HTMLDivElement | null>;
-    iconBtn: string;
-    iconTheme: string;
-    menuItem: string;
-    L: Record<string, string>;
+type RootSessionRowProps = {
+  s: SessionItem;
+  active: boolean;
+  darkMode: boolean;
+  rowActive: string;
+  rowHover: string;
+  onOpenSession?: (sid: string) => void;
+  onRenameSession?: (sid: string) => void;
+  onDeleteSession?: (sid: string) => void;
+  onCopySessionLink?: (sid: string) => void;
+  copiedSid: string | null;
+  setMenu: (m: SessionMenuState) => void;
+  menu: SessionMenuState;
+  sessionMenuRef: React.RefObject<HTMLDivElement | null>;
+  iconBtn: string;
+  iconTheme: string;
+  menuItem: string;
+  L: Record<string, string>;
 };
 
-function SessionRow({
-    s,
-    active,
-    darkMode,
-    rowActive,
-    rowHover,
-    onOpenSession,
-    onRenameSession,
-    onDeleteSession,
-    onCopySessionLink,
-    copiedSid,
-    setMenu,
-    menu,
-    sessionMenuRef,
-    iconBtn,
-    iconTheme,
-    menuItem,
-    L,
-}: SessionRowProps) {
-    const title = safeTitle(s,);
-    return (
+function RootSessionRow({
+  s,
+  active,
+  darkMode,
+  rowActive,
+  rowHover,
+  onOpenSession,
+  onRenameSession,
+  onDeleteSession,
+  onCopySessionLink,
+  copiedSid,
+  setMenu,
+  menu,
+  sessionMenuRef,
+  iconBtn,
+  iconTheme,
+  menuItem,
+  L,
+}: RootSessionRowProps) {
+  const title = safeTitle(s);
+
+  const menuOpen =
+    menu?.type === "session" &&
+    menu.sid === s.id;
+
+
+  // Portaled to document.body — same fix as SessionRow.tsx/
+  // SidebarFooter.tsx/ProjectsSection.tsx's flyouts, since the
+  // sidebar's overflow-hidden clips anything positioned absolute
+  // inside it, and this menu was previously using left-2 right-2
+  // (stretching almost the full sidebar width) instead of a properly
+  // positioned, sidebar-independent flyout.
+  const menuTriggerRef = useRef<HTMLButtonElement>(null);
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const [menuVisible, setMenuVisible] = useState(false);
+
+  useLayoutEffect(() => {
+    if (menuOpen && menuTriggerRef.current) {
+      const rect = menuTriggerRef.current.getBoundingClientRect();
+      setMenuPos({ top: rect.bottom + 6, left: rect.right + 8 });
+      requestAnimationFrame(() => setMenuVisible(true));
+    } else {
+      setMenuVisible(false);
+      const timeout = setTimeout(() => setMenuPos(null), 150);
+      return () => clearTimeout(timeout);
+    }
+  }, [menuOpen]);
+  return (
+    <div className="group relative">
+      <div
+        className={cn(
+          "relative flex items-center gap-1.5 rounded-md px-2 py-1 transition-colors duration-150",
+          darkMode
+            ? "text-white/88"
+            : "text-slate-900",
+          active ? rowActive : rowHover
+        )}
+      >
         <div
-            className={cn(
-                "group relative flex items-center gap-2 px-2 py-1.5 rounded-lg transition",
-                darkMode ? "text-emerald-200/90" : "text-cyan-100/90",
-                active ? rowActive : rowHover
-            )}
+          className={cn(
+            "hidden md:flex items-center justify-center shrink-0",
+            "opacity-0 group-hover:opacity-45 transition-opacity",
+            "cursor-grab active:cursor-grabbing"
+          )}
+          title={L.drag}
+          aria-hidden="true"
         >
-            <div
-                className="hidden group-hover:flex items-center justify-center opacity-70 hover:opacity-100 cursor-grab active:cursor-grabbing"
-                title={L.drag}
-            >
-                <GripVertical className="w-4 h-4" />
-            </div>
-            <button
-                className="flex-1 flex items-center gap-2 min-w-0"
-                onClick={() => onOpenSession?.(s.id)}
-                type="button"
-                title={title}
-            >
-                <MessageSquare className="w-4 h-4 opacity-80 shrink-0" />
-                <span className="text-[13px] leading-5 line-clamp-1">{title}</span>
-            </button>
-            <button
-                type="button"
-                onClick={() =>
-                    setMenu(
-                        menu?.type === "session" && menu.sid === s.id ? null : { type: "session", sid: s.id }
-                    )
-                }
-                className={cn(
-                    "opacity-0 group-hover:opacity-100 transition",
-                    iconBtn,
-                    iconTheme,
-                    "h-7 w-7"
-                )}
-                aria-label={L.options}
-                title={L.options}
-            >
-                <MoreHorizontal className="w-4 h-4" />
-            </button>
-            {menu?.type === "session" && menu.sid === s.id && (
-                <div
-                    ref={sessionMenuRef}
-                    className={cn(
-                        "absolute top-[38px]",
-                        "right-2",
-                        "w-[220px] rounded-2xl border shadow-[0_18px_60px_rgba(0,0,0,0.55)]",
-                        "bg-white dark:bg-gray-900",
-                        "p-2 z-[9999]"
-                    )}
-                >
-                    <button
-                        type="button"
-                        className={menuItem}
-                        onClick={() => {
-                            onCopySessionLink?.(s.id);
-                            setMenu(null);
-                        }}
-                    >
-                        {copiedSid === s.id ? (
-                            <Check className="w-4 h-4" />
-                        ) : (
-                            <LinkIcon className="w-4 h-4" />
-                        )}
-                        <span>{L.copyLink}</span>
-                    </button>
-                    <button
-                        type="button"
-                        className={menuItem}
-                        onClick={() => {
-                            onRenameSession?.(s.id);
-                            setMenu(null);
-                        }}
-                    >
-                        <Pencil className="w-4 h-4" />
-                        <span>{L.rename}</span>
-                    </button>
-                    <div className="my-2 h-px bg-white/10" />
-                    <button
-                        type="button"
-                        className={cn(menuItem, "text-red-200 hover:bg-red-500/10")}
-                        onClick={() => {
-                            onDeleteSession?.(s.id);
-                            setMenu(null);
-                        }}
-                    >
-                        <Trash2 className="w-4 h-4" />
-                        <span>{L.delete}</span>
-                    </button>
-                </div>
-            )}
+          <GripVertical className="w-3 h-3" />
         </div>
-    );
+
+        <button
+          type="button"
+          className="min-w-0 flex-1 text-left"
+          onClick={() => onOpenSession?.(s.id)}
+          title={title}
+        >
+          <div className="truncate text-[12.5px] font-medium leading-5">
+            {title}
+          </div>
+        </button>
+
+        <button
+          type="button"
+          ref={menuTriggerRef}
+          onClick={() =>
+            setMenu(
+              menuOpen
+                ? null
+                : {
+                    type: "session",
+                    sid: s.id,
+                  }
+            )
+          }
+          className={cn(
+            "shrink-0 transition-all",
+            menuOpen
+              ? "opacity-100"
+              : "opacity-0 group-hover:opacity-100",
+            iconBtn,
+            iconTheme,
+            "h-6 w-6"
+          )}
+          aria-label={L.options}
+          title={L.options}
+        >
+          <MoreHorizontal className="w-3.5 h-3.5" />
+        </button>
+      </div>
+
+      {menuOpen && menuPos && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              ref={sessionMenuRef}
+              className={cn(
+                "fixed z-[9999] w-[220px] flex flex-col",
+                "rounded-2xl border p-2 transition-all duration-150 ease-out",
+                menuVisible
+                  ? "opacity-100 scale-100"
+                  : "opacity-0 scale-95",
+                "border-white/[0.08] bg-[#0f1012]/95 backdrop-blur-2xl text-white shadow-[0_20px_50px_rgba(0,0,0,0.45)]"
+              )}
+              style={{
+                top: menuPos.top,
+                left: menuPos.left,
+                transformOrigin: "top right",
+              }}
+            >
+              <SessionMenu
+                sId={s.id}
+                copiedSid={copiedSid}
+                onCopySessionLink={onCopySessionLink}
+                onRenameSession={onRenameSession}
+                onDeleteSession={onDeleteSession}
+                setMenu={setMenu}
+                menuItem={menuItem}
+                L={L}
+                darkMode={darkMode}
+              />
+            </div>,
+            document.body
+          )
+        : null}
+    </div>
+  );
 }

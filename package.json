@@ -6,11 +6,21 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "type-check": "tsc --noEmit",
+    "check": "npm run lint && npm run type-check",
+    "clean": "rm -rf .next node_modules/.cache",
+    "reinstall": "rm -rf node_modules package-lock.json .next && npm install"
   },
   "dependencies": {
+    "@radix-ui/react-popover": "^1.1.15",
     "@tanstack/react-query": "^5.90.21",
     "axios": "^1.13.2",
+    "baseline-browser-mapping": "^2.10.37",
+    "caniuse-lite": "^1.0.30001799",
+    "clsx": "^2.1.1",
+    "cmdk": "^1.1.1",
     "diff": "^8.0.3",
     "emoji-picker-react": "^4.18.0",
     "framer-motion": "^12.34.4",
@@ -21,7 +31,8 @@
     "react-dom": "19.2.1",
     "react-markdown": "^10.1.0",
     "react-virtuoso": "^4.18.1",
-    "remark-gfm": "^4.0.1"
+    "remark-gfm": "^4.0.1",
+    "zustand": "^5.0.13"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -29,10 +40,14 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "autoprefixer": "^10.4.22",
-    "eslint": "^9",
+    "eslint": "^9.39.1",
     "eslint-config-next": "16.0.8",
     "postcss": "^8.5.6",
+    "prettier": "^3.8.3",
     "tailwindcss": "^3.4.14",
     "typescript": "^6.0.3"
+  },
+  "engines": {
+    "node": ">=20.0.0"
   }
 }

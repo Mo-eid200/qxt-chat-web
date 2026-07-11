@@ -1,28 +1,21 @@
 "use client";
 
-import React, { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import React, {
+  useEffect, useRef, useState,
+  useCallback, useMemo,
+} from "react";
 import {
-  Mic,
-  Plus,
-  Send,
-  Loader2,
-  X,
-  AlertCircle,
-  Image as ImageIcon,
-  FileText,
-  Smile,
-  ChevronDown,
-  Zap,
+  Mic, Plus, Send, Loader2, X,
+  AlertCircle, Image as ImageIcon,
+  FileText, Smile, ChevronDown, Zap,
 } from "lucide-react";
 import EmojiPicker from "emoji-picker-react";
-import { useVoice } from "../../hooks/useVoice";
-import { createSession } from "../../lib/api/chat/sessions";
-import { useUpload } from "../../hooks/useUpload";
-import { getStoredToken } from "../../lib/api/core/qxtClient";
+import { useVoice }        from "../../hooks/useVoice";
+import { createSession }   from "../../lib/api/chat/sessions";
+import { useUpload }       from "../../hooks/useUpload";
+import { getStoredToken }  from "../../lib/api/core/qxtClient";
 
-// ========================
-// TYPES
-// ========================
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 type PendingImage = {
   url: string;
@@ -37,10 +30,7 @@ type PendingDocument = {
   mimeType?: string;
 };
 
-type Model = {
-  id: string;
-  label: string;
-};
+type Model = { id: string; label: string };
 
 type VoiceMessage = {
   id?: string;
@@ -64,12 +54,11 @@ interface ChatFooterProps {
     images?: string[];
     files?: PendingDocument[];
   }) => Promise<void> | void;
-
   pendingImages: PendingImage[];
   setPendingImages: React.Dispatch<React.SetStateAction<PendingImage[]>>;
   pendingDocuments?: PendingDocument[];
   setPendingDocuments?: React.Dispatch<React.SetStateAction<PendingDocument[]>>;
-  onStop?: () => void; // ✅ stopRequest from parent (kills pendingStage/streaming/loading)
+  onStop?: () => void;
   sessionId?: string | null;
   selectedModel?: Model | null;
   onModelChange?: (model: Model) => void;
@@ -86,390 +75,295 @@ interface ChatFooterProps {
   onSessionChange?: (id: string, session: any) => void;
 }
 
-// ========================
-// CONSTANTS
-// ========================
+// ─── Constants ────────────────────────────────────────────────────────────────
 
-const PLACEHOLDER_SUGGESTIONS = [
-  "Ask Quarc about anything...",
+const SUGGESTIONS = [
+  "Ask Quark about anything...",
   "Get feedback on your ideas...",
   "Improve your productivity...",
   "Learn something new...",
   "Brainstorm your next project...",
-  "Get creative inspiration...",
 ];
 
-const MAX_FILE_SIZE = 10 * 1024 * 1024;
+// ─── Sub-components ───────────────────────────────────────────────────────────
 
-// ========================
-// MAIN COMPONENT
-// ========================
+const IconBtn = React.memo(({
+  onClick, disabled, title, children, className = "",
+}: {
+  onClick?: () => void;
+  disabled?: boolean;
+  title?: string;
+  children: React.ReactNode;
+  className?: string;
+}) => (
+  <button
+    onClick={onClick}
+    disabled={disabled}
+    title={title}
+    className={`
+      h-8 w-8 rounded-lg flex items-center justify-center
+      transition-all duration-150
+      disabled:opacity-40 disabled:cursor-not-allowed
+      ${className}
+    `}
+  >
+    {children}
+  </button>
+));
+IconBtn.displayName = "IconBtn";
+
+// ─── Main Component ───────────────────────────────────────────────────────────
 
 export function ChatFooter({
-  input,
-  loading,
-  lang,
-  darkMode,
-  placeholder,
-  onChange,
-  onSend,
-  pendingImages,
-  setPendingImages,
-  pendingDocuments = [],
-  setPendingDocuments,
-  onStop,
-  sessionId,
-  selectedModel,
-  onModelChange,
-  models = [],
-  onVoiceMessage,
-  onRecordingStateChange,
-  onQuotaExceeded,
-  onSessionChange,
+  input, loading, lang, darkMode, placeholder,
+  onChange, onSend,
+  pendingImages, setPendingImages,
+  pendingDocuments = [], setPendingDocuments,
+  onStop, sessionId,
+  selectedModel, onModelChange, models = [],
+  onVoiceMessage, onRecordingStateChange,
+  onQuotaExceeded, onSessionChange,
 }: ChatFooterProps) {
-  // ========================
-  // STATE
-  // ========================
 
   const token = getStoredToken() || "";
-  const [error, setError] = useState<string | null>(null);
-  const { upload, cancel: cancelUpload, progress: uploadProgress, uploading: isUploading } = useUpload(token);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [emojiOpen, setEmojiOpen] = useState(false);
+  const { upload, progress: uploadProgress, uploading: isUploading } = useUpload(token);
+
+  const [error, setError]               = useState<string | null>(null);
+  const [menuOpen, setMenuOpen]         = useState(false);
+  const [emojiOpen, setEmojiOpen]       = useState(false);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
-  const [currentPlaceholderIndex, setCurrentPlaceholderIndex] = useState(0);
+  const [suggestionIdx, setSuggestionIdx] = useState(0);
   const [typedPlaceholder, setTypedPlaceholder] = useState("");
   const [recordingTime, setRecordingTime] = useState(0);
+  const [mounted, setMounted]           = useState(false);
 
-  // Audio visualization
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const animationRef = useRef<number | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const textareaRef         = useRef<HTMLTextAreaElement>(null);
+  const containerRef        = useRef<HTMLDivElement>(null);
+  const placeholderTimer    = useRef<NodeJS.Timeout | null>(null);
+  const recordingTimer      = useRef<NodeJS.Timeout | null>(null);
+  const audioCtxRef         = useRef<AudioContext | null>(null);
+  const analyserRef         = useRef<AnalyserNode | null>(null);
+  const animationRef        = useRef<number | null>(null);
+  const canvasRef           = useRef<HTMLCanvasElement | null>(null);
+  const voiceIdRef          = useRef<string | null>(null);
+  const voiceCanceledRef    = useRef(false);
 
-  // Voice tracking
-  const currentVoiceIdRef = useRef<string | null>(null);
-  const voiceCanceledRef = useRef(false); // ✅ gate late events after cancel
+  // ضيف الـ handler دا
+const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+  const items = e.clipboardData?.items;
+  if (!items) return;
 
-  // ========================
-  // REFS
-  // ========================
+  for (const item of Array.from(items)) {
+    if (item.type.startsWith("image/")) {
+      e.preventDefault();
 
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const placeholderTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const recordingTimerRef = useRef<NodeJS.Timeout | null>(null);
+      const file = item.getAsFile();
+      if (!file) continue;
 
-  // ========================
-  // LANGUAGE & DIRECTION
-  // ========================
+      const preview = URL.createObjectURL(file);
+      const temp = { url: "", preview, type: "image" as const };
+      setPendingImages((p) => [...p, temp]);
 
-  const isArabic = lang === "ar";
-  const textDirection = isArabic ? "rtl" : "ltr";
+      upload(file).then((res) => {
+        if (!res?.url) { setError("Upload failed"); return; }
 
-  // ========================
-  // VOICE HOOK
-  // ========================
+        setPendingImages((p) =>
+          p.map((img) => {
+            if (img.preview === preview && !img.url) {
+              URL.revokeObjectURL(preview);
+              return { ...img, url: res.url, preview: res.url };
+            }
+            return img;
+          })
+        );
+      });
+
+      break; // صورة واحدة في المرة
+    }
+  }
+}, [setPendingImages, upload]);
+
+  const isAr = lang === "ar";
+
+  // ── Voice hook ───────────────────────────────────────────────────────────────
 
   const voiceState = useVoice({
     voiceMode: !!(sessionId || selectedModel),
     selectedModel: selectedModel ? { id: selectedModel.id } : undefined,
     sessionId: sessionId || undefined,
-
     onSessionCreatedAction: (id: string) => {
-      console.log("[ChatFooter] 📋 Session created callback:", id);
       window.history.replaceState({}, "", `?sid=${id}`);
     },
-
-    onCompleteAction: () => {
-      console.log("[ChatFooter] ✅ Voice action complete");
-    },
-
-    // Pass-through
+    onCompleteAction: () => {},
     onMessageAction: (data: VoiceMessage) => {
-      // ✅ Ignore any late events after cancel (prevents wrong ordering / phantom bubbles)
-      if (voiceCanceledRef.current) return;
-
-      if (!onVoiceMessage) return;
-
-      const baseId = currentVoiceIdRef.current || data.id || `voice-${Date.now()}`;
-      if (!currentVoiceIdRef.current) currentVoiceIdRef.current = baseId;
+      if (voiceCanceledRef.current || !onVoiceMessage) return;
+      const baseId = voiceIdRef.current || data.id || `voice-${Date.now()}`;
+      if (!voiceIdRef.current) voiceIdRef.current = baseId;
 
       if (data.role === "user") {
-        onVoiceMessage({
-          id: baseId,
-          role: "user",
-          kind: (data.kind as any) || (data.text ? "text" : "stream_update"),
-          text: data.text,
-          audioUrl: data.audioUrl,
-        });
-        return;
+        onVoiceMessage({ id: baseId, role: "user", kind: (data.kind as any) || (data.text ? "text" : "stream_update"), text: data.text, audioUrl: data.audioUrl });
+      } else {
+        onVoiceMessage({ id: `assistant-${baseId}`, role: "assistant", kind: (data.kind as any) || (data.text ? "text" : "stream_update"), text: data.text, audioUrl: data.audioUrl });
       }
-
-      onVoiceMessage({
-        id: `assistant-${baseId}`,
-        role: "assistant",
-        kind: (data.kind as any) || (data.text ? "text" : "stream_update"),
-        text: data.text,
-        audioUrl: data.audioUrl,
-      });
     },
   });
 
   const {
-    isRecording = false,
-    isProcessing = false,
-    liveStatus = "",
-    error: voiceError = null,
-    startRecording = async () => { },
-    interruptVoice = async () => { },
+    isRecording = false, isProcessing = false,
+    liveStatus = "", error: voiceError = null,
+    startRecording = async () => {},
+    interruptVoice = async () => {},
   } = voiceState || {};
 
   const isVoiceActive = isRecording || isProcessing;
 
-  // ========================
-  // WAVE DRAWING FUNCTION
-  // ========================
+  // ── Computed ─────────────────────────────────────────────────────────────────
+
+  const currentModel = useMemo(() =>
+    selectedModel || models[0] || null,
+  [selectedModel, models]);
+
+  const canSend = useMemo(() =>
+    (input.trim().length > 0 || pendingImages.length > 0) &&
+    !loading && !isUploading && !!currentModel?.id && !isVoiceActive,
+  [input, pendingImages.length, loading, isUploading, currentModel?.id, isVoiceActive]);
+
+  const formattedTime = useMemo(() => {
+    const m = Math.floor(recordingTime / 60);
+    const s = recordingTime % 60;
+    return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  }, [recordingTime]);
+
+  // ── Wave ─────────────────────────────────────────────────────────────────────
 
   const drawWave = useCallback(() => {
-    const canvas = canvasRef.current;
+    const canvas   = canvasRef.current;
     const analyser = analyserRef.current;
-
     if (!canvas || !analyser) return;
 
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const bufferLength = analyser.fftSize;
-    const dataArray = new Uint8Array(bufferLength);
-
-    analyser.getByteTimeDomainData(dataArray);
-
+    const data = new Uint8Array(analyser.fftSize);
+    analyser.getByteTimeDomainData(data);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = "#ef4444";
-
+    ctx.lineWidth   = 1.5;
+    ctx.strokeStyle = "rgba(239,68,68,0.8)";
     ctx.beginPath();
 
-    const sliceWidth = canvas.width / bufferLength;
+    const sw = canvas.width / data.length;
     let x = 0;
-
-    for (let i = 0; i < bufferLength; i++) {
-      const v = dataArray[i] / 128.0;
-      const y = (v * canvas.height) / 2;
-
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-
-      x += sliceWidth;
-    }
+    data.forEach((v, i) => {
+      const y = (v / 128) * (canvas.height / 2);
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+      x += sw;
+    });
 
     ctx.lineTo(canvas.width, canvas.height / 2);
     ctx.stroke();
-
     if (isRecording) animationRef.current = requestAnimationFrame(drawWave);
   }, [isRecording]);
 
-  // ========================
-  // COMPUTED VALUES
-  // ========================
+  // ── Effects ───────────────────────────────────────────────────────────────────
 
-  const availableModels = useMemo(() => models || [], [models]);
-  const currentModel = useMemo(() => {
-    if (selectedModel) return selectedModel;
-
-    // fallback
-    if (models.length > 0) return models[0];
-
-    return null;
-  }, [selectedModel, models]);
-
-  const canSendMessage = useMemo(
-    () =>
-      (input.trim().length > 0 || pendingImages.length > 0) &&
-      !loading &&
-      !isUploading &&
-      !!currentModel?.id &&
-      !isVoiceActive,
-    [input, pendingImages.length, loading, isUploading, currentModel?.id, isVoiceActive]
-  );
-
-  const shouldDisableInput = useMemo(
-    () => loading || isVoiceActive || isProcessing,
-    [loading, isVoiceActive, isProcessing]
-  );
-
-  const sendButtonStyles = useMemo(() => {
-    if (!canSendMessage) {
-      return darkMode
-        ? "bg-gray-700/50 text-gray-500 cursor-not-allowed opacity-50"
-        : "bg-gray-300/50 text-gray-500 cursor-not-allowed opacity-50";
-    }
-    return "bg-green-600/80 hover:bg-green-600 text-white transition-colors";
-  }, [canSendMessage, darkMode]);
-
-  const bgInput = useMemo(
-    () =>
-      darkMode
-        ? "bg-gray-700/60 hover:bg-gray-600/80 text-gray-300 hover:text-gray-100"
-        : "bg-gray-200/60 hover:bg-gray-300/80 text-gray-700 hover:text-gray-900",
-    [darkMode]
-  );
-
-  const bgGlassomorphic = useMemo(
-    () => (darkMode ? "bg-gray-900/95 border-gray-700/60" : "bg-white/95 border-gray-300/60"),
-    [darkMode]
-  );
-
-  const buttonHoverStyles = useMemo(
-    () => `h-8 w-8 rounded-lg flex items-center justify-center transition-all ${bgInput}`,
-    [bgInput]
-  );
-
-  const formattedTime = useMemo(() => {
-    const minutes = Math.floor(recordingTime / 60);
-    const seconds = recordingTime % 60;
-    return `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
-  }, [recordingTime]);
-
-  // ========================
-  // EFFECTS
-  // ========================
-
+  useEffect(() => { setMounted(true); }, []);
 
   useEffect(() => {
-    const textarea = textareaRef.current;
-    if (!textarea) return;
-
-    textarea.style.height = "auto";
-    const newHeight = Math.min(textarea.scrollHeight, 150);
-    textarea.style.height = `${newHeight}px`;
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
   }, [input]);
 
   useEffect(() => {
     if (!isRecording) return;
-
-    if (audioContextRef.current && audioContextRef.current.state !== "closed") {
-      audioContextRef.current.close();
-    }
+    audioCtxRef.current?.close();
 
     (window as any).__onVoiceStreamReady = (stream: MediaStream) => {
       try {
-        const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-        const source = audioContext.createMediaStreamSource(stream);
-        const analyser = audioContext.createAnalyser();
-
-        analyser.fftSize = 1024;
-        source.connect(analyser);
-
-        audioContextRef.current = audioContext;
-        analyserRef.current = analyser;
-
+        const ac  = new (window.AudioContext || (window as any).webkitAudioContext)();
+        const src = ac.createMediaStreamSource(stream);
+        const an  = ac.createAnalyser();
+        an.fftSize = 1024;
+        src.connect(an);
+        audioCtxRef.current = ac;
+        analyserRef.current = an;
         drawWave();
-      } catch (err) {
-        console.error("[ChatFooter] ❌ Audio context error:", err);
-      }
+      } catch {}
     };
 
     return () => {
       (window as any).__onVoiceStreamReady = null;
-
       if (animationRef.current) cancelAnimationFrame(animationRef.current);
-      if (audioContextRef.current && audioContextRef.current.state !== "closed") {
-        audioContextRef.current.close();
-      }
+      audioCtxRef.current?.close();
     };
   }, [isRecording, drawWave]);
 
   useEffect(() => {
-    if (sessionId || input.trim().length > 0 || isVoiceActive) {
+    if (sessionId || input.trim() || isVoiceActive) {
       setTypedPlaceholder("");
-      if (placeholderTimerRef.current) clearTimeout(placeholderTimerRef.current);
+      if (placeholderTimer.current) clearTimeout(placeholderTimer.current);
       return;
     }
 
-    const phrase = PLACEHOLDER_SUGGESTIONS[currentPlaceholderIndex];
-    let charIndex = 0;
+    const phrase = SUGGESTIONS[suggestionIdx];
+    let i = 0;
     setTypedPlaceholder("");
 
-    const typingInterval = setInterval(() => {
-      if (charIndex < phrase.length) {
-        setTypedPlaceholder(phrase.slice(0, charIndex + 1));
-        charIndex++;
+    const t = setInterval(() => {
+      if (i < phrase.length) {
+        setTypedPlaceholder(phrase.slice(0, ++i));
       } else {
-        clearInterval(typingInterval);
-        placeholderTimerRef.current = setTimeout(() => {
-          setCurrentPlaceholderIndex((prev) => (prev + 1) % PLACEHOLDER_SUGGESTIONS.length);
+        clearInterval(t);
+        placeholderTimer.current = setTimeout(() => {
+          setSuggestionIdx((p) => (p + 1) % SUGGESTIONS.length);
         }, 3000);
       }
-    }, 40);
+    }, 38);
 
-    return () => clearInterval(typingInterval);
-  }, [currentPlaceholderIndex, sessionId, input, isVoiceActive]);
+    return () => clearInterval(t);
+  }, [suggestionIdx, sessionId, input, isVoiceActive]);
 
   useEffect(() => {
-    if (!isRecording) {
-      if (recordingTimerRef.current) clearTimeout(recordingTimerRef.current);
-      setRecordingTime(0);
-      return;
-    }
-
+    if (!isRecording) { setRecordingTime(0); return; }
     setRecordingTime(0);
-    const timer = setInterval(() => setRecordingTime((prev) => prev + 1), 1000);
-    recordingTimerRef.current = timer as any;
-
-    return () => clearInterval(timer);
+    const t = setInterval(() => setRecordingTime((p) => p + 1), 1000);
+    recordingTimer.current = t as any;
+    return () => clearInterval(t);
   }, [isRecording]);
 
   useEffect(() => {
     if (!error) return;
-    const timer = setTimeout(() => setError(null), 4000);
-    return () => clearTimeout(timer);
+    const t = setTimeout(() => setError(null), 4000);
+    return () => clearTimeout(t);
   }, [error]);
 
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+    const handler = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
         setMenuOpen(false);
         setEmojiOpen(false);
         setModelMenuOpen(false);
       }
     };
-
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  useEffect(() => {
-    onRecordingStateChange?.(isVoiceActive);
-  }, [isVoiceActive, onRecordingStateChange]);
+  useEffect(() => { onRecordingStateChange?.(isVoiceActive); }, [isVoiceActive, onRecordingStateChange]);
+  useEffect(() => { if (voiceError && !voiceError.includes("Audio")) setError(voiceError); }, [voiceError]);
 
-  useEffect(() => {
-    if (voiceError && !voiceError.includes("Audio")) setError(voiceError);
-  }, [voiceError]);
-
-  // ========================
-  // HANDLERS
-  // ========================
+  // ── Handlers ─────────────────────────────────────────────────────────────────
 
   const handleVoiceToggle = useCallback(async () => {
     let sid = sessionId;
 
     if (!isRecording) {
-      // ✅ starting recording: allow voice events
       voiceCanceledRef.current = false;
-
       const tempId = `voice-${Date.now()}`;
-      currentVoiceIdRef.current = tempId;
+      voiceIdRef.current = tempId;
 
-      // show recording bubble immediately
-      onVoiceMessage?.({
-        id: tempId,
-        role: "user",
-        text: "",
-        kind: "recording",
-      });
+      onVoiceMessage?.({ id: tempId, role: "user", text: "", kind: "recording" });
 
       if (!sid) {
         try {
@@ -477,9 +371,9 @@ export function ChatFooter({
           sid = res.id;
           onSessionChange?.(sid, res);
           window.history.replaceState({}, "", `?sid=${sid}`);
-        } catch (err) {
+        } catch {
           setError("Failed to create session");
-          currentVoiceIdRef.current = null;
+          voiceIdRef.current = null;
           return;
         }
       }
@@ -488,521 +382,457 @@ export function ChatFooter({
       return;
     }
 
-    // submit recording
     await startRecording();
   }, [sessionId, isRecording, startRecording, onSessionChange, onVoiceMessage]);
 
-  /**
-   * ✅ Cancel behavior (GPT-like):
-   * - remove user recording bubble + assistant temp bubble
-   * - stop system status immediately (pendingStage/streaming/loading)
-   * - ignore any late voice events after cancel (so no weird ordering)
-   */
   const handleInterruptVoice = useCallback(async () => {
-    const vid = currentVoiceIdRef.current;
-
-    // 1) stop parent "system status" immediately
+    const vid = voiceIdRef.current;
     onStop?.();
-
-    // 2) gate late events immediately
     voiceCanceledRef.current = true;
-    currentVoiceIdRef.current = null;
+    voiceIdRef.current = null;
 
-    // 3) remove temp bubbles in UI
     if (vid) {
-      onVoiceMessage?.({ id: vid, role: "user", kind: "stream_update", text: "__VOICE_CANCEL__" });
-      onVoiceMessage?.({
-        id: `assistant-${vid}`,
-        role: "assistant",
-        kind: "stream_update",
-        text: "__VOICE_CANCEL__",
-      });
+      onVoiceMessage?.({ id: vid,              role: "user",      kind: "stream_update", text: "__VOICE_CANCEL__" });
+      onVoiceMessage?.({ id: `assistant-${vid}`, role: "assistant", kind: "stream_update", text: "__VOICE_CANCEL__" });
     }
 
-    // 4) stop recorder in background
-    try {
-      await interruptVoice();
-    } catch {
-      // ignore
-    }
+    try { await interruptVoice(); } catch {}
   }, [interruptVoice, onVoiceMessage, onStop]);
 
   const handleSend = useCallback(async () => {
-    if (isVoiceActive) {
-      setError("Stop recording first");
-      return;
-    }
-
-    if (!canSendMessage) {
-      if (!input.trim() && pendingImages.length === 0) setError("Type a message or attach media");
-      return;
-    }
+    if (!canSend) return;
 
     try {
       setError(null);
-
-      if (!currentModel?.id) {
-        setError("No model available");
-        return;
-      }
-
       await onSend({
-        text: input.trim(),
-        model: currentModel!.id,
+        text:   input.trim(),
+        model:  currentModel!.id,
         isVoiceActive: false,
-        images: pendingImages.filter(img => img.url).map(img => img.url),
-        files: pendingDocuments.filter(f => f.url),
+        images: pendingImages.filter((i) => i.url).map((i) => i.url),
+        files:  pendingDocuments.filter((f) => f.url),
       });
       onChange("");
       setPendingImages([]);
       setPendingDocuments?.([]);
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "Failed to send message";
-      setError(errorMessage);
+      setError(err instanceof Error ? err.message : "Failed to send");
     }
-  }, [isVoiceActive, canSendMessage, input, pendingImages.length, currentModel, onSend, onChange]);
+  }, [canSend, input, currentModel, pendingImages, pendingDocuments, onSend, onChange, setPendingImages, setPendingDocuments]);
 
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
-        e.preventDefault();
-        if (!loading && !isVoiceActive && canSendMessage) handleSend();
+  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault();
+      if (!loading && !isVoiceActive && canSend) handleSend();
+    }
+    if (e.key === "Enter" && e.shiftKey) {
+      e.preventDefault();
+      const ta  = e.currentTarget;
+      const pos = ta.selectionStart;
+      onChange(input.slice(0, pos) + "\n" + input.slice(ta.selectionEnd));
+      setTimeout(() => { ta.selectionStart = ta.selectionEnd = pos + 1; }, 0);
+    }
+  }, [loading, isVoiceActive, canSend, handleSend, input, onChange]);
+
+  const handleFileSelect = useCallback((type: "image" | "file") => {
+    const el   = document.createElement("input");
+    el.type    = "file";
+    el.accept  = type === "image" ? "image/*,video/*" : "*";
+
+    el.onchange = async (ev: any) => {
+      const file = ev.target.files?.[0];
+      if (!file) return;
+      setMenuOpen(false);
+
+      const preview = URL.createObjectURL(file);
+
+      if (file.type.startsWith("image") || file.type.startsWith("video")) {
+        const temp = { url: "", preview, type: file.type.startsWith("video") ? "video" as const : "image" as const };
+        setPendingImages((p) => [...p, temp]);
+
+        const res = await upload(file);
+        if (!res?.url) { setError("Upload failed"); return; }
+
+        setPendingImages((p) =>
+          p.map((img) => {
+            if (img.preview === preview && !img.url) {
+              URL.revokeObjectURL(preview);
+              return { ...img, url: res.url, preview: res.url };
+            }
+            return img;
+          })
+        );
+      } else {
+        const temp = { url: "", name: file.name, size: file.size, mimeType: file.type };
+        setPendingDocuments?.((p) => [...(p || []), temp]);
+
+        const res = await upload(file);
+        if (!res?.url) { setError("Upload failed"); return; }
+
+        setPendingDocuments?.((p) =>
+          (p || []).map((d) => d.name === file.name && !d.url ? { ...d, url: res.url } : d)
+        );
       }
+    };
 
-      if (e.key === "Enter" && e.shiftKey) {
-        e.preventDefault();
-        const textarea = e.currentTarget;
-        const start = textarea.selectionStart;
-        const end = textarea.selectionEnd;
+    el.click();
+  }, [setPendingImages, setPendingDocuments, upload]);
 
-        const newValue = input.substring(0, start) + "\n" + input.substring(end);
-        onChange(newValue);
+  const handleRemoveImage = useCallback((idx: number) => {
+    setPendingImages((p) => {
+      const item = p[idx];
+      if (item?.preview?.startsWith("blob:")) URL.revokeObjectURL(item.preview);
+      return p.filter((_, i) => i !== idx);
+    });
+  }, [setPendingImages]);
 
-        setTimeout(() => {
-          textarea.selectionStart = textarea.selectionEnd = start + 1;
-        }, 0);
-      }
-    },
-    [loading, isVoiceActive, canSendMessage, handleSend, input, onChange]
-  );
+  const handleRemoveDoc = useCallback((idx: number) => {
+    setPendingDocuments?.((p) => (p || []).filter((_, i) => i !== idx));
+  }, [setPendingDocuments]);
 
-  const handleFileSelect = useCallback(
-    (type: "image" | "file") => {
-      const inputEl = document.createElement("input");
-      inputEl.type = "file";
-      inputEl.accept = type === "image" ? "image/*,video/*" : "*";
+  const handleEmoji = useCallback((obj: any) => {
+    const ta  = textareaRef.current;
+    if (!ta) return;
+    const pos = ta.selectionStart;
+    onChange(input.slice(0, pos) + obj.emoji + input.slice(ta.selectionEnd));
+    setTimeout(() => { ta.selectionStart = ta.selectionEnd = pos + obj.emoji.length; }, 0);
+  }, [input, onChange]);
 
-      inputEl.onchange = async (event: any) => {
-        const file = event.target.files?.[0];
-        if (!file) return;
+  // ── Styles ────────────────────────────────────────────────────────────────────
 
-        setMenuOpen(false);
+  const dim = darkMode
+    ? "text-white/40 hover:text-white/70 hover:bg-white/[0.06]"
+    : "text-black/40 hover:text-black/70 hover:bg-black/[0.06]";
 
-        const localPreview = URL.createObjectURL(file);
+  const menuClass = darkMode
+    ? "bg-[#0d1117] border-white/[0.07] shadow-[0_8px_32px_rgba(0,0,0,0.5)]"
+    : "bg-white border-black/[0.07] shadow-[0_8px_32px_rgba(0,0,0,0.12)]";
 
-        // ✅ show preview instantly
-        if (file.type.startsWith("image") || file.type.startsWith("video")) {
-          const tempItem = {
-            url: "", // لسه مفيش URL
-            preview: localPreview,
-            type: file.type.startsWith("video") ? "video" as const : "image" as const,
-          };
-
-          setPendingImages((prev) => [...prev, tempItem]);
-
-          // upload في الخلفية
-          const res = await upload(file);
-
-          if (!res?.url) {
-            setError("Upload failed");
-            return;
-          }
-
-          // ✅ replace temp item بالـ URL الحقيقي
-          setPendingImages((prev) =>
-            prev.map((img) => {
-              if (img.preview === localPreview && !img.url) {
-                // ✅ امسح الـ blob
-                URL.revokeObjectURL(localPreview);
-
-                return {
-                  ...img,
-                  url: res.url,
-                  preview: res.url, // ✅ أهم سطر
-                };
-              }
-              return img;
-            })
-          );
-        } else {
-          // documents
-          const tempDoc = {
-            url: "",
-            name: file.name,
-            size: file.size,
-            mimeType: file.type,
-          };
-
-          setPendingDocuments?.((prev) => [...(prev || []), tempDoc]);
-
-          const res = await upload(file);
-
-          if (!res?.url) {
-            setError("Upload failed");
-            return;
-          }
-
-          setPendingDocuments?.((prev) =>
-            (prev || []).map((doc) =>
-              doc.name === file.name && !doc.url
-                ? { ...doc, url: res.url }
-                : doc
-            )
-          );
-        }
-      };
-
-      inputEl.click();
-    },
-    [setPendingImages, setPendingDocuments, upload, setMenuOpen, setError]
-  );
-
-  const handleRemoveImage = useCallback(
-    (index: number) => {
-      setPendingImages((prev) => {
-        const item = prev[index];
-
-        if (item?.preview?.startsWith("blob:")) {
-          URL.revokeObjectURL(item.preview);
-        }
-
-        return prev.filter((_, i) => i !== index);
-      });
-
-    },
-    [setPendingImages]
-  );
-
-  const handleRemoveDocument = useCallback(
-    (index: number) => {
-      setPendingDocuments?.((prev) => (prev || []).filter((_, i) => i !== index));
-    },
-    [setPendingDocuments]
-  );
-
-  const handleInsertEmoji = useCallback(
-    (emojiObject: any) => {
-      const emoji = emojiObject.emoji;
-      const textarea = textareaRef.current;
-      if (!textarea) return;
-
-      const start = textarea.selectionStart;
-      const end = textarea.selectionEnd;
-      const newValue = input.substring(0, start) + emoji + input.substring(end);
-
-      onChange(newValue);
-
-      setTimeout(() => {
-        textarea.selectionStart = textarea.selectionEnd = start + emoji.length;
-      }, 0);
-    },
-    [input, onChange]
-  );
-
-  // ========================
-  // RENDER
-  // ========================
+  // ─────────────────────────────────────────────────────────────────────────────
 
   return (
-    <div ref={containerRef} className="relative transition-colors duration-300" dir={textDirection}>
-      <div className="backdrop-blur-md bg-gradient-to-t from-black/5 to-transparent">
-        <div className="max-w-4xl mx-auto px-4 py-3 space-y-3">
-          {error && (
-            <div className="animate-in slide-in-from-top fade-in duration-300">
-              <div
-                className={`flex items-center gap-3 px-4 py-3 rounded-xl border ${darkMode ? "bg-red-950/40 border-red-900/60" : "bg-red-50/80 border-red-200/60"
-                  }`}
-              >
-                <AlertCircle
-                  className={`w-5 h-5 flex-shrink-0 ${darkMode ? "text-red-400" : "text-red-600"}`}
-                />
-                <p className={`flex-1 text-sm ${darkMode ? "text-red-300" : "text-red-700"}`}>
-                  {error}
-                </p>
-                <button
-                  onClick={() => setError(null)}
-                  className={`flex-shrink-0 p-1 rounded-lg transition-colors ${darkMode ? "hover:bg-red-900/40" : "hover:bg-red-200/40"
-                    }`}
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-          )}
+    <div ref={containerRef} dir={isAr ? "rtl" : "ltr"} className="relative">
 
-          {isRecording && (
-            <div className="flex items-center gap-3 px-4 py-3 rounded-xl border bg-red-500/10 border-red-500/30 backdrop-blur-sm">
-              <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-              <span className="text-xs font-mono text-red-500 min-w-[40px]">{formattedTime}</span>
-              <canvas ref={canvasRef} width={140} height={28} className="flex-1 max-w-[140px]" />
-            </div>
-          )}
+      {/* ── Error toast ── */}
+      {error && (
+        <div className="mb-2 animate-in slide-in-from-top fade-in duration-200">
+          <div className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border text-sm ${
+            darkMode
+              ? "bg-red-950/50 border-red-900/50 text-red-300"
+              : "bg-red-50 border-red-200 text-red-700"
+          }`}>
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span className="flex-1">{error}</span>
+            <button onClick={() => setError(null)} className="shrink-0 opacity-60 hover:opacity-100">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
 
-          {isProcessing && !isRecording && (
-            <div className="animate-in slide-in-from-top fade-in duration-300">
-              <div
-                className={`flex items-center gap-3 px-4 py-3 rounded-xl border ${darkMode
-                  ? "bg-blue-950/40 border-blue-900/60"
-                  : "bg-blue-50/80 border-blue-200/60"
-                  }`}
-              >
-                <Loader2 className={`w-5 h-5 animate-spin ${darkMode ? "text-blue-400" : "text-blue-600"}`} />
-                <p className={`flex-1 text-sm font-medium ${darkMode ? "text-blue-300" : "text-blue-700"}`}>
-                  {liveStatus || (isArabic ? "🔄 جاري معالجة الصوت..." : "🔄 Processing voice...")}
-                </p>
-              </div>
-            </div>
-          )}
+      {/* ── Recording bar ── */}
+      {isRecording && (
+        <div className="mb-2 flex items-center gap-3 px-3.5 py-2 rounded-xl border bg-red-500/8 border-red-500/20">
+          <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse shrink-0" />
+          <span className="text-[11px] font-mono text-red-400 tabular-nums w-10">{formattedTime}</span>
+          <canvas ref={canvasRef} width={120} height={24} className="flex-1 max-w-[120px] opacity-80" />
+        </div>
+      )}
 
-          {(pendingImages.length > 0 || pendingDocuments.length > 0) && (
-            <div className="animate-in slide-in-from-bottom fade-in duration-300">
-              <div
-                className={`flex flex-wrap gap-2 p-3 rounded-xl border ${darkMode ? "bg-gray-800/60 border-gray-700/60" : "bg-gray-100/60 border-gray-300/60"
-                  }`}
-              >
-                {pendingImages.map((media, index) => (
-                  <div key={`media-${index}`} className="relative group">
-                    <div
-                      className={`relative h-16 w-16 rounded-lg overflow-hidden border ${darkMode ? "border-gray-600/60 bg-gray-700/40" : "border-gray-300/60 bg-gray-200/40"
-                        }`}
-                    >
-                      <img
-                        src={media.preview}
-                        alt={`media-${index}`}
-                        className="w-full h-full object-cover"
-                      />
-                      {media.type === "video" && (
-                        <div className="absolute inset-0 flex items-center justify-center bg-black/40">
-                          <div className="w-5 h-5 rounded-full border-2 border-white" />
-                        </div>
-                      )}
-                    </div>
-                    <button
-                      onClick={() => handleRemoveImage(index)}
-                      className="absolute -top-2 -right-2 bg-red-500 hover:bg-red-600 rounded-full p-1 opacity-0 group-hover:opacity-100 transition-all shadow-lg"
-                    >
-                      <X className="w-3 h-3 text-white" />
-                    </button>
-                  </div>
-                ))}
+      {/* ── Processing bar ── */}
+      {isProcessing && !isRecording && (
+        <div className={`mb-2 flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border text-sm ${
+          darkMode
+            ? "bg-blue-950/40 border-blue-900/40 text-blue-300"
+            : "bg-blue-50 border-blue-200 text-blue-700"
+        }`}>
+          <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+          <span>{liveStatus || (isAr ? "جاري معالجة الصوت..." : "Processing voice...")}</span>
+        </div>
+      )}
 
-                {pendingDocuments.map((doc, index) => (
-                  <div key={`doc-${index}`} className="relative group">
-                    <div
-                      className={`relative h-16 w-16 rounded-lg overflow-hidden border flex items-center justify-center ${darkMode ? "border-gray-600/60 bg-gray-700/40" : "border-gray-300/60 bg-gray-200/40"
-                        }`}
-                    >
-                      <FileText className={`w-6 h-6 ${darkMode ? "text-gray-400" : "text-gray-600"}`} />
-                    </div>
-                    <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 px-3 py-1 bg-black/90 rounded-md text-xs text-white whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
-                      {doc.name.length > 12 ? `${doc.name.slice(0, 12)}...` : doc.name}
-                    </div>
-                    <button
-                      onClick={() => handleRemoveDocument(index)}
-                      className="absolute -top-2 -right-2 bg-red-500 hover:bg-red-600 rounded-full p-1 opacity-0 group-hover:opacity-100 transition-all shadow-lg"
-                    >
-                      <X className="w-3 h-3 text-white" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div
-            className={`flex items-end gap-2 px-4 py-3 rounded-2xl shadow-lg transition-all duration-200 ${darkMode
-              ? "bg-white/5 backdrop-blur-xl shadow-[0_8px_30px_rgba(0,0,0,0.4)]"
-              : "bg-white/10 backdrop-blur-xl shadow-[0_8px_30px_rgba(0,0,0,0.2)]"
-              }`}
-          >
-            {/* Model Selector */}
-            <div className="relative flex-shrink-0">
-              <button
-                onClick={() => setModelMenuOpen(!modelMenuOpen)}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${bgInput}`}
-              >
-                <Zap className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline max-w-[80px] truncate">{currentModel?.label || "Model"}</span>
-                <ChevronDown className={`w-3 h-3 transition-transform ${modelMenuOpen ? "rotate-180" : ""}`} />
-              </button>
-
-              {modelMenuOpen && availableModels.length > 0 && (
-                <div
-                  className={`absolute bottom-full mb-2 left-0 w-56 rounded-xl border shadow-lg backdrop-blur-md animate-in slide-in-from-bottom fade-in duration-200 z-50 overflow-hidden ${bgGlassomorphic}`}
-                >
-                  <div className="flex flex-col py-1">
-                    {availableModels.map((model) => (
-                      <button
-                        key={model.id}
-                        onClick={() => {
-                          onModelChange?.(model);
-                          setModelMenuOpen(false);
-                        }}
-                        className={`flex items-center gap-2 px-3 py-2 text-sm transition-colors ${currentModel?.id === model.id
-                          ? darkMode
-                            ? "bg-gray-700/60 text-gray-100"
-                            : "bg-gray-200/60 text-gray-900"
-                          : darkMode
-                            ? "hover:bg-gray-800/40 text-gray-400"
-                            : "hover:bg-gray-100/40 text-gray-600"
-                          }`}
-                      >
-                        <Zap className="w-3.5 h-3.5" />
-                        <span className="font-medium">{model.label}</span>
-                        {currentModel?.id === model.id && <div className="ml-auto w-1.5 h-1.5 rounded-full bg-green-600" />}
-                      </button>
-                    ))}
-                  </div>
+      {/* ── Pending attachments ── */}
+      {(pendingImages.length > 0 || pendingDocuments.length > 0) && (
+        <div className={`mb-2 flex flex-wrap gap-2 p-2.5 rounded-xl border ${
+          darkMode ? "bg-white/[0.03] border-white/[0.06]" : "bg-black/[0.02] border-black/[0.06]"
+        }`}>
+          {pendingImages.map((m, i) => (
+            <div key={i} className="relative group w-14 h-14 rounded-lg overflow-hidden shrink-0">
+              <img src={m.preview} alt="" className="w-full h-full object-cover" />
+              {!m.url && (
+                <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                  <Loader2 className="w-3.5 h-3.5 text-white animate-spin" />
                 </div>
               )}
+              <button
+                onClick={() => handleRemoveImage(i)}
+                className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full bg-black/70 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+              >
+                <X className="w-3 h-3 text-white" />
+              </button>
             </div>
+          ))}
 
-            <div className={`w-px h-6 ${darkMode ? "bg-gray-700/40" : "bg-gray-300/40"}`} />
+          {pendingDocuments.map((d, i) => (
+            <div key={i} className={`relative group flex items-center gap-2 pl-2.5 pr-7 py-2 rounded-lg border text-xs ${
+              darkMode ? "bg-white/[0.04] border-white/[0.08] text-white/60" : "bg-black/[0.03] border-black/[0.08] text-black/60"
+            }`}>
+              <FileText className="w-3.5 h-3.5 shrink-0" />
+              <span className="max-w-[80px] truncate">{d.name}</span>
+              {!d.url && <Loader2 className="w-3 h-3 animate-spin shrink-0" />}
+              <button
+                onClick={() => handleRemoveDoc(i)}
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
-            <textarea
-              ref={textareaRef}
-              rows={1}
-              value={input}
-              onChange={(e) => onChange(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder={sessionId ? "Message..." : typedPlaceholder || "Message..."}
-              disabled={shouldDisableInput}
-              className={`flex-1 resize-none outline-none border-0 text-sm bg-transparent disabled:opacity-50 focus:outline-none focus:ring-0 ${darkMode ? "text-gray-100" : "text-gray-900"
-                }`}
-            />
-            {isUploading && (
-              <div className="text-xs px-4 text-emerald-300/80">
-                Uploading... {Math.round(uploadProgress)}%
+      {/* ── Main input box ── */}
+      <div className={`rounded-2xl border transition-all duration-200 ${
+  darkMode
+    ? "bg-white/[0.04] border-white/[0.06] focus-within:border-emerald-500/40 focus-within:bg-white/[0.05] focus-within:shadow-[0_0_0_1px_rgba(16,185,129,0.15)]"
+    : "bg-black/[0.03] border-black/[0.06] focus-within:border-emerald-500/50 focus-within:shadow-[0_0_0_1px_rgba(16,185,129,0.12)]"
+}`}>
+
+        {/* Textarea */}
+        <div className="px-4 pt-3.5 pb-2">
+          <textarea
+            ref={textareaRef}
+            rows={1}
+            value={input}
+            onChange={(e) => onChange(e.target.value)}
+            onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
+            placeholder={sessionId ? "Message..." : (typedPlaceholder || placeholder || "Message...")}
+            disabled={loading || isVoiceActive}
+            className={`w-full resize-none bg-transparent text-sm leading-relaxed
+  outline-none ring-0 border-0 appearance-none
+  focus:outline-none focus:ring-0 focus:border-0 focus:shadow-none
+  placeholder:transition-opacity
+  disabled:opacity-50
+  ${darkMode ? "text-white placeholder:text-white/25" : "text-black placeholder:text-black/30"}
+`}
+          />
+        </div>
+
+        {/* Upload progress */}
+        {isUploading && (
+          <div className="px-4 pb-2">
+            <div className={`h-0.5 rounded-full overflow-hidden ${darkMode ? "bg-white/10" : "bg-black/10"}`}>
+              <div
+                className="h-full bg-emerald-500 transition-all duration-300 rounded-full"
+                style={{ width: `${uploadProgress}%` }}
+              />
+            </div>
+            <span className={`text-[11px] mt-1 block ${darkMode ? "text-white/30" : "text-black/30"}`}>
+              Uploading {Math.round(uploadProgress)}%
+            </span>
+          </div>
+        )}
+
+        {/* Toolbar */}
+        <div className="flex items-center gap-1 px-3 pb-3">
+
+          {/* ── Model selector ── */}
+          <div className="relative">
+            <button
+              onClick={() => setModelMenuOpen((v) => !v)}
+              className={`
+                flex items-center gap-1.5 h-7 px-2.5 rounded-lg text-[12px] font-medium
+                transition-all duration-150
+                ${darkMode
+                  ? "text-white/45 hover:text-white/70 hover:bg-white/[0.06]"
+                  : "text-black/45 hover:text-black/70 hover:bg-black/[0.06]"
+                }
+              `}
+            >
+              <Zap className="w-3 h-3" />
+              <span className="hidden sm:block max-w-[90px] truncate">
+                {mounted ? (currentModel?.label || "Model") : "Model"}
+              </span>
+              <ChevronDown className={`w-3 h-3 transition-transform duration-200 ${modelMenuOpen ? "rotate-180" : ""}`} />
+            </button>
+
+            {modelMenuOpen && models.length > 0 && (
+              <div className={`
+                absolute bottom-full mb-2 left-0 w-52
+                rounded-xl border overflow-hidden
+                animate-in slide-in-from-bottom-2 fade-in duration-150
+                z-50 ${menuClass}
+              `}>
+                {models.map((m) => (
+                  <button
+                    key={m.id}
+                    onClick={() => { onModelChange?.(m); setModelMenuOpen(false); }}
+                    className={`
+                      w-full flex items-center gap-2.5 px-3.5 py-2.5 text-sm text-left
+                      transition-colors duration-100
+                      ${currentModel?.id === m.id
+                        ? darkMode ? "bg-white/[0.08] text-white"       : "bg-black/[0.06] text-black"
+                        : darkMode ? "text-white/55 hover:bg-white/[0.05] hover:text-white/80"
+                                   : "text-black/55 hover:bg-black/[0.04] hover:text-black/80"
+                      }
+                    `}
+                  >
+                    <Zap className="w-3.5 h-3.5 shrink-0" />
+                    <span className="flex-1 font-medium">{m.label}</span>
+                    {currentModel?.id === m.id && (
+                      <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                    )}
+                  </button>
+                ))}
               </div>
             )}
-
-            <div className="flex items-center gap-1.5 flex-shrink-0">
-              {!isRecording ? (
-                <>
-                  <button
-                    onClick={handleVoiceToggle}
-                    disabled={loading || isProcessing}
-                    className={`h-8 w-8 rounded-lg flex items-center justify-center transition-all font-medium ${isProcessing
-                      ? darkMode
-                        ? "bg-blue-600/40 text-blue-300"
-                        : "bg-blue-100/80 text-blue-600"
-                      : bgInput
-                      } disabled:opacity-50 disabled:cursor-not-allowed`}
-                    title={isProcessing ? "Processing voice..." : "Start recording"}
-                  >
-                    {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Mic className="w-4 h-4" />}
-                  </button>
-
-                  <div className="relative">
-                    <button
-                      onClick={() => setEmojiOpen(!emojiOpen)}
-                      disabled={isVoiceActive}
-                      className={`${buttonHoverStyles} disabled:opacity-50 disabled:cursor-not-allowed`}
-                    >
-                      <Smile className="w-4 h-4" />
-                    </button>
-
-                    {emojiOpen && (
-                      <div className="absolute bottom-full right-0 mb-3 z-50 animate-in slide-in-from-bottom fade-in duration-200">
-                        <EmojiPicker
-                          onEmojiClick={handleInsertEmoji}
-                          height={350}
-                          width={300}
-                          searchDisabled
-                          skinTonesDisabled
-                          previewConfig={{ showPreview: false }}
-                        />
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="relative">
-                    <button
-                      onClick={() => setMenuOpen(!menuOpen)}
-                      disabled={isVoiceActive}
-                      className={`${buttonHoverStyles} disabled:opacity-50 disabled:cursor-not-allowed`}
-                    >
-                      <Plus className="w-4 h-4" />
-                    </button>
-
-                    {menuOpen && (
-                      <div
-                        className={`absolute bottom-full right-0 mb-3 rounded-xl border shadow-lg backdrop-blur-md animate-in slide-in-from-bottom fade-in duration-200 z-50 overflow-hidden ${bgGlassomorphic}`}
-                      >
-                        <div className="flex flex-col">
-                          <button
-                            onClick={() => handleFileSelect("image")}
-                            disabled={isUploading || isVoiceActive}
-                            className={`flex items-center gap-3 px-4 py-2.5 text-sm border-b ${darkMode
-                              ? "hover:bg-gray-800/40 border-gray-700/40 text-gray-300"
-                              : "hover:bg-gray-100/40 border-gray-300/40 text-gray-700"
-                              }`}
-                          >
-                            <ImageIcon className="w-4 h-4" />
-                            Image & video
-                          </button>
-
-                          <button
-                            onClick={() => handleFileSelect("file")}
-                            disabled={isUploading || isVoiceActive}
-                            className={`flex items-center gap-3 px-4 py-2.5 text-sm ${darkMode ? "hover:bg-gray-800/40 text-gray-300" : "hover:bg-gray-100/40 text-gray-700"
-                              }`}
-                          >
-                            <FileText className="w-4 h-4" />
-                            Files
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  <button
-                    onClick={handleSend}
-                    disabled={!canSendMessage}
-                    className={`h-8 w-8 rounded-lg flex items-center justify-center transition-all font-medium ${sendButtonStyles}`}
-                  >
-                    {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button
-                    onClick={handleInterruptVoice}
-                    className="h-8 w-8 rounded-lg flex items-center justify-center bg-red-600/80 hover:bg-red-600 text-white transition-colors"
-                    title="Cancel recording"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-
-                  <button
-                    onClick={handleVoiceToggle}
-                    className="h-8 w-8 rounded-lg flex items-center justify-center bg-green-600/80 hover:bg-green-600 text-white transition-colors"
-                    title="Submit recording"
-                  >
-                    <Send className="w-4 h-4" />
-                  </button>
-                </>
-              )}
-            </div>
           </div>
 
-          {!loading && !isVoiceActive && (
-            <p className={`text-xs px-4 ${darkMode ? "text-gray-500" : "text-gray-600"}`}>
-              {isArabic ? "اضغط Shift + Enter للسطر الجديد" : "Shift + Enter for new line"}
-            </p>
+          {/* Divider */}
+          <div className={`w-px h-4 mx-1 ${darkMode ? "bg-white/[0.08]" : "bg-black/[0.08]"}`} />
+
+          {/* ── Emoji ── */}
+          <div className="relative">
+            <IconBtn
+              onClick={() => setEmojiOpen((v) => !v)}
+              disabled={isVoiceActive}
+              title="Emoji"
+              className={dim}
+            >
+              <Smile className="w-4 h-4" />
+            </IconBtn>
+
+            {emojiOpen && (
+              <div className="absolute bottom-full right-0 mb-2 z-50 animate-in slide-in-from-bottom-2 fade-in duration-150">
+                <EmojiPicker
+                  onEmojiClick={handleEmoji}
+                  height={340}
+                  width={290}
+                  searchDisabled
+                  skinTonesDisabled
+                  previewConfig={{ showPreview: false }}
+                />
+              </div>
+            )}
+          </div>
+
+          {/* ── Attach ── */}
+          <div className="relative">
+            <IconBtn
+              onClick={() => setMenuOpen((v) => !v)}
+              disabled={isVoiceActive}
+              title="Attach"
+              className={dim}
+            >
+              <Plus className="w-4 h-4" />
+            </IconBtn>
+
+            {menuOpen && (
+              <div className={`
+                absolute bottom-full right-0 mb-2 w-44
+                rounded-xl border overflow-hidden
+                animate-in slide-in-from-bottom-2 fade-in duration-150
+                z-50 ${menuClass}
+              `}>
+                {[
+                  { label: "Image & video", icon: ImageIcon, type: "image" as const },
+                  { label: "File",          icon: FileText,  type: "file"  as const },
+                ].map(({ label, icon: Icon, type }) => (
+                  <button
+                    key={type}
+                    onClick={() => handleFileSelect(type)}
+                    disabled={isUploading || isVoiceActive}
+                    className={`
+                      w-full flex items-center gap-2.5 px-3.5 py-2.5 text-sm
+                      transition-colors duration-100 disabled:opacity-40
+                      ${darkMode
+                        ? "text-white/60 hover:bg-white/[0.05] hover:text-white/85"
+                        : "text-black/60 hover:bg-black/[0.04] hover:text-black/85"
+                      }
+                      ${type === "image" ? `border-b ${darkMode ? "border-white/[0.06]" : "border-black/[0.06]"}` : ""}
+                    `}
+                  >
+                    <Icon className="w-3.5 h-3.5 shrink-0" />
+                    <span>{label}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Spacer */}
+          <div className="flex-1" />
+
+          {/* ── Voice / Send ── */}
+          {!isRecording ? (
+            <div className="flex items-center gap-1.5">
+              {/* Mic */}
+              <IconBtn
+                onClick={handleVoiceToggle}
+                disabled={loading || isProcessing}
+                title={isProcessing ? "Processing..." : "Voice"}
+                className={isProcessing
+                  ? darkMode ? "text-blue-400 bg-blue-500/10" : "text-blue-600 bg-blue-500/10"
+                  : dim
+                }
+              >
+                {isProcessing
+                  ? <Loader2 className="w-4 h-4 animate-spin" />
+                  : <Mic className="w-4 h-4" />
+                }
+              </IconBtn>
+
+              {/* Send */}
+              <button
+                onClick={handleSend}
+                disabled={!canSend}
+                className={`
+                  h-8 w-8 rounded-lg flex items-center justify-center
+                  transition-all duration-150
+                  ${canSend
+                    ? "bg-white text-black hover:bg-white/90"
+                    : darkMode
+                      ? "bg-white/[0.06] text-white/25 cursor-not-allowed"
+                      : "bg-black/[0.06] text-black/25 cursor-not-allowed"
+                  }
+                `}
+              >
+                {loading
+                  ? <Loader2 className="w-4 h-4 animate-spin" />
+                  : <Send className="w-3.5 h-3.5" />
+                }
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5">
+              {/* Cancel */}
+              <IconBtn
+                onClick={handleInterruptVoice}
+                title="Cancel"
+                className="text-red-400 hover:text-red-300 hover:bg-red-500/10"
+              >
+                <X className="w-4 h-4" />
+              </IconBtn>
+
+              {/* Submit voice */}
+              <button
+                onClick={handleVoiceToggle}
+                title="Send"
+                className="h-8 w-8 rounded-lg flex items-center justify-center bg-white text-black hover:bg-white/90 transition-all"
+              >
+                <Send className="w-3.5 h-3.5" />
+              </button>
+            </div>
           )}
         </div>
       </div>
+
+      {/* ── Hint ── */}
+      {!loading && !isVoiceActive && (
+        <p className={`mt-2 text-[11px] px-1 ${darkMode ? "text-white/20" : "text-black/25"}`}>
+          {isAr ? "Shift + Enter للسطر الجديد" : "Shift + Enter for new line"}
+        </p>
+      )}
     </div>
   );
 }

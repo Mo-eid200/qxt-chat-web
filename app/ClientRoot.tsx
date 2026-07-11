@@ -1,14 +1,11 @@
-// app/ClientRoot.tsx
 "use client";
 
 import Providers from "./providers";
 
 export default function ClientRoot({
-    children,
+  children,
 }: {
-    children: React.ReactNode;
+  children: React.ReactNode;
 }) {
-    console.log("🔥 ClientRoot mounted");
-
-    return <Providers>{children}</Providers>;
+  return <Providers>{children}</Providers>;
 }

@@ -1,181 +1,425 @@
 import React from "react";
-import { Folder, FolderOpen, Plus } from "lucide-react";
-import { ProjectFolder } from "../types";
+import { createPortal } from "react-dom";
+import {
+  FolderOpen,
+  Plus,
+} from "lucide-react";
+
+import type {
+  ProjectFolder,
+  SessionItem,
+} from "../types";
 import { cn } from "../utils/cn";
-import { SectionHeader } from "../items/SectionHeader";
 import { ProjectFolderBlock } from "../items/ProjectFolderBlock";
+import { SessionRow } from "../items/SessionRow";
+
+type SessionMenuState =
+  | { type: "session"; sid: string }
+  | { type: "search" }
+  | null;
+
+type ProjectsWithLists = Array<
+  ProjectFolder & {
+    chats: SessionItem[];
+  }
+>;
 
 type ProjectsSectionProps = {
-    collapsed?: boolean;
-    isLoggedIn: boolean;
-    L: Record<string, string>;
-    projectsWithLists: ProjectFolder[];
-    projectOpen: Record<string, boolean>;
-    onCreateProjectFolder?: (title: string) => void;
-    openCreateProject?: () => void;
-    creatingProject: boolean;
-    projectDraft: string;
-    setProjectDraft: (val: string) => void;
-    submitCreateProject: () => void;
-    closeCreateProject: () => void;
-    rowHover: string;
-    darkMode: boolean;
-    miniIconBtn: string;
-    miniIconTheme: string;
-    q: string;
-    textMuted: string;
-    sectionProps: Omit<Parameters<typeof SectionHeader>[0], "title" | "sectionKey" | "IconOpen" | "IconClosed">;
-    // + باقي props اللازمة لتمريرها لكل ProjectFolderBlock (مثل drag & drop / callback ... إلخ)
-    rootList: any[]; // لو تحتاج استدعاء root list sessions
-    onAccountClick?: () => void;
-    createChatInFolder: (id: string | null) => void;
-    setProjectOpen: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
-    setDropProjectOver: (id: string | null) => void;
-    setDraggingId: (id: string | null) => void;
-    setDropOverId: (id: string | null) => void;
-    setDropSectionOver: (
-        v: string | null
-    ) => void;
-    onMoveSessionToFolder?: (sid: string, folderId: string | null) => void;
-    draggingId: string | null;
-    dropProjectOver: string | null;
-    createChatInProject: (folderId: string | null) => void;
+  isLoggedIn: boolean;
+  L: Record<string, string>;
+  projectsWithLists: ProjectsWithLists;
+  projectOpen: Record<string, boolean>;
+  creatingProject: boolean;
+  projectDraft: string;
+  setProjectDraft: (val: string) => void;
+  submitCreateProject: () => void;
+  closeCreateProject: () => void;
+  rowHover: string;
+  darkMode: boolean;
+  miniIconBtn: string;
+  miniIconTheme: string;
+  iconBtn?: string;
+  iconTheme?: string;
+  menuItem?: string;
+  rowActive?: string;
+  q: string;
+  textMuted: string;
+  rootList: SessionItem[];
+  onAccountClick?: () => void;
+  openCreateProject?: () => void;
+  createChatInFolder: (
+    id: string | null
+  ) => void;
+  setProjectOpen: React.Dispatch<
+    React.SetStateAction<
+      Record<string, boolean>
+    >
+  >;
+  setDropProjectOver: (
+    id: string | null
+  ) => void;
+  setDraggingId: (
+    id: string | null
+  ) => void;
+  setDropOverId: (
+    id: string | null
+  ) => void;
+  setDropSectionOver: (
+    v: string | null
+  ) => void;
+  onMoveSessionToFolder?: (
+    sid: string,
+    folderId: string | null
+  ) => void;
+  draggingId: string | null;
+  dropProjectOver: string | null;
+  copiedSid?: string | null;
+  menu?: SessionMenuState;
+  setMenu?: (m: SessionMenuState) => void;
+  sessionMenuRef?: React.RefObject<HTMLDivElement | null>;
+  onOpenSession?: (sid: string) => void;
+  onDeleteSession?: (sid: string) => void;
+  onRenameSession?: (sid: string) => void;
+  onCopySessionLink?: (sid: string) => void;
+  orderMap?: Record<string, string[]>;
+  syncOrderKey?: (
+    folderId: string | null,
+    ids: string[]
+  ) => void;
+  onReorderFolderSessions?: (
+    folderId: string | null,
+    ids: string[]
+  ) => void;
+    selectedProjectId?: string | null;
+  onSelectProject?: (
+    projectId: string
+  ) => void;
+
 };
 
+function CreateProjectInline({
+  darkMode,
+  value,
+  setValue,
+  onSubmit,
+  onCancel,
+  miniIconBtn,
+  miniIconTheme,
+  textMuted,
+  L,
+}: {
+  darkMode: boolean;
+  value: string;
+  setValue: (val: string) => void;
+  onSubmit: () => void;
+  onCancel: () => void;
+  miniIconBtn: string;
+  miniIconTheme: string;
+  textMuted: string;
+  L: Record<string, string>;
+}) {
+  // Unified with the rest of the sidebar: same row height/padding as
+  // ScopeButton (px-3 py-2.5, rounded-2xl), amber accent instead of
+  // indigo, no helper text line underneath — this is meant to feel
+  // like every other single-line row, just with an inline input.
+  // No border/background here — the parent flyout card (in
+  // ProjectsSection.tsx) already provides the single card boundary.
+  // Giving this row its own border+bg on top of that produced a
+  // "box inside a box" nested look.
+  return (
+    <div className="w-full flex items-center gap-2.5 px-1 py-1">
+      <div className="h-7 w-7 rounded-xl flex items-center justify-center shrink-0 bg-amber-300/[0.14] text-amber-200">
+        <FolderOpen className="w-4 h-4" />
+      </div>
+      <input
+        autoFocus
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") onSubmit();
+          if (e.key === "Escape") onCancel();
+        }}
+        placeholder={L.projectNamePlaceholder || "Project name"}
+        className="min-w-0 flex-1 bg-transparent outline-none text-[14px] text-white placeholder:text-white/35"
+      />
+      <button
+        type="button"
+        className="h-7 px-2.5 rounded-lg text-[12px] font-semibold bg-amber-300 text-black hover:bg-amber-200 transition active:scale-[0.98] disabled:opacity-40"
+        onClick={onSubmit}
+        disabled={!value.trim()}
+        title={L.create}
+      >
+        {L.create}
+      </button>
+      <button
+        type="button"
+        className="h-7 w-7 shrink-0 flex items-center justify-center rounded-lg text-white/40 hover:bg-white/[0.06] hover:text-white/70"
+        onClick={onCancel}
+        title={L.cancel}
+      >
+        ×
+      </button>
+    </div>
+  );
+}
+
+function CreateProjectNestedRow({
+  darkMode,
+  onClick,
+  label,
+}: {
+  darkMode: boolean;
+  onClick?: () => void;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="w-full flex items-center gap-2.5 rounded-2xl px-3 py-2.5 text-left border border-amber-300/15 bg-amber-300/[0.05] text-amber-100 hover:bg-amber-300/[0.08] transition-all duration-200"
+    >
+      <div className="h-7 w-7 rounded-xl flex items-center justify-center shrink-0 bg-amber-300/[0.14] text-amber-200">
+        <Plus className="w-4 h-4" />
+      </div>
+      <div className="min-w-0">
+        <div className="text-[13px] font-medium leading-5">
+          {label}
+        </div>
+      </div>
+    </button>
+  );
+}
+
 export function ProjectsSection({
-    isLoggedIn,
-    L,
-    projectsWithLists,
-    projectOpen,
-    openCreateProject,
-    creatingProject,
-    projectDraft,
-    setProjectDraft,
-    submitCreateProject,
-    closeCreateProject,
-    rowHover,
-    darkMode,
-    miniIconBtn,
-    miniIconTheme,
-    q,
-    textMuted,
-    sectionProps,
-    rootList,
-    onAccountClick,
-    createChatInFolder,
-    setProjectOpen,
-    setDropProjectOver,
-    setDraggingId,
-    setDropOverId,
-    setDropSectionOver,
-    onMoveSessionToFolder,
-    draggingId,
-    dropProjectOver,
-    createChatInProject,
+  isLoggedIn,
+  L,
+  projectsWithLists,
+  projectOpen,
+  creatingProject,
+  projectDraft,
+  setProjectDraft,
+  submitCreateProject,
+  closeCreateProject,
+  rowHover,
+  darkMode,
+  miniIconBtn,
+  miniIconTheme,
+  iconBtn = "",
+  iconTheme = "",
+  menuItem = "",
+  rowActive = "",
+  q,
+  textMuted,
+  rootList,
+  onAccountClick,
+  openCreateProject,
+  createChatInFolder,
+  setProjectOpen,
+  setDropProjectOver,
+  setDraggingId,
+  setDropOverId,
+  setDropSectionOver,
+  onMoveSessionToFolder,
+  draggingId,
+  dropProjectOver,
+  copiedSid = null,
+  menu = null,
+  setMenu = () => {},
+  sessionMenuRef,
+  onOpenSession,
+  onDeleteSession,
+  onRenameSession,
+  onCopySessionLink,
+  orderMap = {},
+  syncOrderKey = () => {},
+  onReorderFolderSessions,
+  selectedProjectId = null,
+  onSelectProject = () => {},
 }: ProjectsSectionProps) {
-    return (
-        <section>
-            <SectionHeader
-                sectionKey="projects"
-                title={L.projects}
-                IconOpen={FolderOpen}
-                IconClosed={Folder}
-                showPlusWhenOpen
-                onPlus={openCreateProject}
-                {...sectionProps}
+  const emptyBoxClass = cn(
+    "rounded-2xl border px-3 py-3 text-[12px] leading-5",
+    darkMode
+      ? "border-white/[0.06] bg-white/[0.03] text-white/60"
+      : "border-black/[0.06] bg-black/[0.03] text-slate-500"
+  );
+
+  // The "Create project" flyout is portaled to document.body and
+  // positioned via getBoundingClientRect of the trigger row — this is
+  // necessary because the sidebar's <aside> has overflow-hidden (so
+  // any wider-than-sidebar content, like this 288px-wide flyout,
+  // would otherwise get visually clipped at the sidebar's edge no
+  // matter what z-index it has).
+  const createTriggerRef = React.useRef<HTMLDivElement>(null);
+  const [flyoutPos, setFlyoutPos] = React.useState<{ top: number; left: number } | null>(null);
+  // Drives the enter/exit motion (fade + scale). Separate from
+  // `creatingProject` itself so we can keep the flyout mounted for one
+  // extra frame while its exit transition plays out.
+  const [flyoutVisible, setFlyoutVisible] = React.useState(false);
+
+  React.useEffect(() => {
+    if (creatingProject && createTriggerRef.current) {
+      const rect = createTriggerRef.current.getBoundingClientRect();
+      setFlyoutPos({ top: rect.top, left: rect.right + 8 });
+      // Mount first with visible=false, then flip to true on the next
+      // frame so the CSS transition actually animates from the
+      // opacity-0/scale-95 starting state instead of snapping in.
+      requestAnimationFrame(() => setFlyoutVisible(true));
+    } else {
+      setFlyoutVisible(false);
+      const timeout = setTimeout(() => setFlyoutPos(null), 150);
+      return () => clearTimeout(timeout);
+    }
+  }, [creatingProject]);
+
+  return (
+    <div className="relative space-y-2">
+      <div ref={createTriggerRef}>
+        <CreateProjectNestedRow
+          darkMode={darkMode}
+          onClick={openCreateProject}
+          label={
+            L.createProject ||
+            "Create project"
+          }
+        />
+      </div>
+
+      {creatingProject && flyoutPos && typeof document !== "undefined"
+        ? createPortal(
+            <>
+              <div
+                className="fixed inset-0 z-40"
+                onClick={closeCreateProject}
+              />
+              <div
+                className={`fixed z-50 w-80 rounded-2xl border border-white/[0.08] bg-[#0f1012]/95 backdrop-blur-2xl p-2.5 shadow-[0_20px_50px_rgba(0,0,0,0.45)] transition-all duration-150 ease-out ${
+                  flyoutVisible ? "opacity-100 scale-100" : "opacity-0 scale-95"
+                }`}
+                style={{ top: flyoutPos.top, left: flyoutPos.left, transformOrigin: "left top" }}
+              >
+                <CreateProjectInline
+                  darkMode={darkMode}
+                  value={projectDraft}
+                  setValue={setProjectDraft}
+                  onSubmit={submitCreateProject}
+                  onCancel={closeCreateProject}
+                  miniIconBtn={miniIconBtn}
+                  miniIconTheme={miniIconTheme}
+                  textMuted={textMuted}
+                  L={L}
+                />
+              </div>
+            </>,
+            document.body
+          )
+        : null}
+
+      {!isLoggedIn ? (
+        <div className={emptyBoxClass}>
+          {L.signInToView}
+        </div>
+      ) : projectsWithLists.length > 0 ? (
+        <div className="space-y-1">
+          {projectsWithLists.map((f) => (
+            <ProjectFolderBlock
+  key={f.id}
+  f={f}
+  selected={
+    selectedProjectId === f.id
+  }
+  onSelectProject={
+    onSelectProject
+  }
+              isOpen={
+                projectOpen[f.id] ?? true
+              }
+              dropOn={false}
+              darkMode={darkMode}
+              rowHover={rowHover}
+              isLoggedIn={isLoggedIn}
+              onAccountClick={onAccountClick}
+              createChatInFolder={
+                createChatInFolder
+              }
+              L={L}
+              setProjectOpen={setProjectOpen}
+              setDropProjectOver={
+                setDropProjectOver
+              }
+              setDraggingId={setDraggingId}
+              setDropOverId={setDropOverId}
+              setDropSectionOver={
+                setDropSectionOver
+              }
+              onMoveSessionToFolder={
+                onMoveSessionToFolder
+              }
+              draggingId={draggingId}
+              dropProjectOver={
+                dropProjectOver
+              }
+              q={q}
+              list={f.chats || []}
+              emptyBox={emptyBoxClass}
+              rootList={rootList}
+              SessionRowComponent={({
+                s,
+                folderId,
+              }) => (
+                <SessionRow
+                  s={s}
+                  folderId={folderId}
+                  active={false}
+                  darkMode={darkMode}
+                  rowActive={rowActive}
+                  rowHover={rowHover}
+                  onOpenSession={onOpenSession}
+                  onRenameSession={onRenameSession}
+                  onDeleteSession={onDeleteSession}
+                  onCopySessionLink={
+                    onCopySessionLink
+                  }
+                  copiedSid={copiedSid}
+                  draggingId={draggingId}
+                  dropOverId={null}
+                  setDraggingId={setDraggingId}
+                  setDropOverId={setDropOverId}
+                  setDropSectionOver={
+                    setDropSectionOver
+                  }
+                  setDropProjectOver={
+                    setDropProjectOver
+                  }
+                  setMenu={setMenu}
+                  menu={menu}
+                  sessionMenuRef={
+                    sessionMenuRef || {
+                      current: null,
+                    }
+                  }
+                  iconBtn={iconBtn}
+                  iconTheme={iconTheme}
+                  menuItem={menuItem}
+                  L={L}
+                  orderMap={orderMap}
+                  rootList={rootList}
+                  projectsWithLists={
+                    projectsWithLists
+                  }
+                  syncOrderKey={syncOrderKey}
+                  onReorderFolderSessions={
+                    onReorderFolderSessions
+                  }
+                />
+              )}
             />
-            {creatingProject && (
-                <div className="mt-2 px-2">
-                    <div
-                        className={cn(
-                            "rounded-2xl border p-2 backdrop-blur-xl",
-                            darkMode ? "bg-black/35 border-emerald-900/55" : "bg-black/15 border-cyan-900/45"
-                        )}
-                    >
-                        <div className="flex items-center gap-2">
-                            <FolderOpen className="w-4 h-4 opacity-85" />
-                            <input
-                                autoFocus
-                                value={projectDraft}
-                                onChange={(e) => setProjectDraft(e.target.value)}
-                                onKeyDown={(e) => {
-                                    if (e.key === "Enter") submitCreateProject();
-                                    if (e.key === "Escape") closeCreateProject();
-                                }}
-                                placeholder={L.projectNamePlaceholder}
-                                className={cn(
-                                    "w-full bg-transparent outline-none text-[12px] px-2 py-2 rounded-xl",
-                                    darkMode
-                                        ? "text-emerald-50 placeholder:text-emerald-100/40"
-                                        : "text-cyan-50 placeholder:text-cyan-100/45"
-                                )}
-                            />
-                            <button
-                                type="button"
-                                className={cn(
-                                    "h-9 px-3 rounded-xl text-[12px] font-semibold transition active:scale-[0.98]",
-                                    darkMode
-                                        ? "bg-emerald-500/15 hover:bg-emerald-500/22 border border-emerald-400/30 text-emerald-50"
-                                        : "bg-cyan-500/15 hover:bg-cyan-500/22 border border-cyan-400/30 text-cyan-50"
-                                )}
-                                onClick={submitCreateProject}
-                                disabled={!projectDraft.trim()}
-                                title={L.create}
-                            >
-                                {L.create}
-                            </button>
-                            <button
-                                type="button"
-                                className={cn(miniIconBtn, miniIconTheme, "h-9 w-9")}
-                                onClick={closeCreateProject}
-                                title={L.cancel}
-                            >
-                                ×
-                            </button>
-                        </div>
-                        <div className={cn("mt-2 text-[11px] opacity-75", textMuted)}>{L.createHint}</div>
-                    </div>
-                </div>
-            )}
-            <div className="mt-1 pl-2 pr-1 space-y-1">
-                {!isLoggedIn ? (
-                    <div className={cn("px-2 py-2 rounded-lg text-[12px]", darkMode ? "text-emerald-300/70 bg-black/20" : "text-cyan-100/70 bg-black/10")}>
-                        {L.signInToView}
-                    </div>
-                ) : projectsWithLists.length === 0 ? (
-                    <div className={cn("px-2 py-2 rounded-lg text-[12px]", darkMode ? "text-emerald-300/70 bg-black/20" : "text-cyan-100/70 bg-black/10")}>
-                        {q ? L.noResults : L.noProjects}
-                    </div>
-                ) : (
-                    projectsWithLists.map((f) => (
-                        <ProjectFolderBlock
-                            key={f.id}
-                            f={f}
-                            isOpen={projectOpen[f.id] ?? true}
-                            dropOn={false}
-                            darkMode={darkMode}
-                            rowHover={rowHover}
-                            isLoggedIn={isLoggedIn}
-                            onAccountClick={onAccountClick}
-                            createChatInFolder={createChatInFolder}
-                            L={L}
-                            setProjectOpen={setProjectOpen}
-                            setDropProjectOver={setDropProjectOver}
-                            setDraggingId={setDraggingId}
-                            setDropOverId={setDropOverId}
-                            setDropSectionOver={setDropSectionOver}
-                            onMoveSessionToFolder={onMoveSessionToFolder}
-                            draggingId={draggingId}
-                            dropProjectOver={dropProjectOver}
-                            q={q}
-                            list={f.chats || []}
-                            emptyBox={""}
-                            rootList={rootList}
-                            SessionRowComponent={() => null}
-                        />
-                    ))
-                )}
-            </div>
-        </section>
-    );
+          ))}
+        </div>
+      ) : q ? (
+        <div className={emptyBoxClass}>
+          {L.noResults}
+        </div>
+      ) : null}
+    </div>
+  );
 }

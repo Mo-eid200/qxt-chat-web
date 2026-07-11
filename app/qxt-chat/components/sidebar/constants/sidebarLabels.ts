@@ -1,109 +1,119 @@
 import type {
-    SidebarEnvironment,
+  SidebarEnvironment,
 } from "./sidebarEnvironment";
 
 const commonLabels = {
-    search: "Search",
-
-    clear: "Clear",
-
-    rename: "Rename",
-
-    delete: "Delete",
-
-    create: "Create",
-
-    cancel: "Cancel",
-
-    open: "Open",
-
-    options: "Options",
-
-    collapse: "Collapse",
-
-    expand: "Expand",
-
-    busy: "Updating...",
-
-    noResults: "No results.",
-
-    copyLink: "Copy chat link",
-
-    drag: "Drag to reorder",
-
-    dropToMove:
-        "Drop here to move chat",
+  search: "Search",
+  clear: "Clear",
+  rename: "Rename",
+  delete: "Delete",
+  create: "Create",
+  cancel: "Cancel",
+  open: "Open",
+  options: "Options",
+  collapse: "Collapse",
+  expand: "Expand",
+  busy: "Updating...",
+  noResults: "No results.",
+  copyLink: "Copy chat link",
+  drag: "Drag to reorder",
+  dropToMove:
+    "Drop here to move chat",
 };
 
 export function getSidebarLabels(
-    environment: SidebarEnvironment
+  environment: SidebarEnvironment
 ) {
-    const isWorkspace =
-        environment === "workspace";
+  const isWorkspace =
+    environment === "workspace";
 
-    return {
-        ...commonLabels,
+  const isAgent =
+    environment === "agent";
 
-        newChat: isWorkspace
-            ? "New workspace chat"
-            : "New chat",
+  return {
+    ...commonLabels,
 
-        newChatInProject:
-            "New chat in project",
+    newChat: isAgent
+      ? "New agent chat"
+      : isWorkspace
+        ? "New workspace chat"
+        : "New chat",
 
-        signInHint:
-            "Sign in to sync your AI environment",
+    newChatInProject: isAgent
+      ? "New agent conversation"
+      : "New chat in project",
 
-        yourAccount: isWorkspace
-            ? "Workspace account"
-            : "Your ChatQXT account",
+    signInHint:
+      "Sign in to sync your AI environment",
 
-        noSessions:
-            "No conversations yet.",
+    yourAccount: isAgent
+      ? "Agent runtime session"
+      : isWorkspace
+        ? "Workspace account"
+        : "Your ChatQXT account",
 
-        signInToView:
-            "Sign in to access chats.",
+    noSessions: isAgent
+      ? "No agent conversations yet."
+      : "No conversations yet.",
 
-        workspace: isWorkspace
-            ? "Team Workspace"
-            : "Personal Workspace",
+    signInToView:
+      "Sign in to access chats.",
 
-        chats: isWorkspace
-            ? "Workspace Chats"
-            : "Chats",
+    workspace: isAgent
+      ? "Agent Workspace"
+      : isWorkspace
+        ? "Team Workspace"
+        : "Personal Workspace",
 
-        projects: isWorkspace
-            ? "Team Projects"
-            : "Projects",
+    chats: isAgent
+      ? "Agent Chats"
+      : isWorkspace
+        ? "Workspace Chats"
+        : "Chats",
 
-        library: "Library",
+    projects: isAgent
+      ? "Agent Resources"
+      : isWorkspace
+        ? "Team Projects"
+        : "Projects",
 
-        code: "QXT Code",
+    library: isAgent
+      ? "Knowledge"
+      : "Library",
 
-        newProject:
-            "New project",
+    code: isAgent
+      ? "Agent Code"
+      : "QXT Code",
 
-        vision: "QXT Vision",
+    newProject: isAgent
+      ? "New resource"
+      : "New project",
 
-        coming:
-            "OpenQCore AI Ecosystem",
+    vision: "QXT Vision",
 
-        comingDesc:
-            "Explore AI products, tools, agents, and enterprise systems powered by OpenQCore.",
+    coming:
+      "OpenQCore AI Ecosystem",
 
-        chatsSearch:
-            "Search conversations",
+    comingDesc:
+      "Explore AI products, tools, agents, and enterprise systems powered by OpenQCore.",
 
-        searchPlaceholder:
-            "Search chats...",
+    chatsSearch: isAgent
+      ? "Search agent conversations"
+      : "Search conversations",
 
-        noProjects:
-            "No projects yet.",
+    searchPlaceholder: isAgent
+      ? "Search agent chats..."
+      : "Search chats...",
 
-        projectNamePlaceholder:
-            "Project name...",
+    noProjects: isAgent
+      ? "No resources yet."
+      : "No projects yet.",
 
-        createHint:
-            "Press Enter to create — Esc to cancel",
-    };
+    projectNamePlaceholder: isAgent
+      ? "Resource name..."
+      : "Project name...",
+
+    createHint:
+      "Press Enter to create — Esc to cancel",
+  };
 }

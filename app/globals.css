@@ -3,28 +3,63 @@
 @tailwind utilities;
 
 /* ============================================================================
-   خلفيات وألوان أساسية
+   Site-wide color system (single dark theme, no light-mode branch).
+   The base gray/black is constant everywhere; only --accent switches,
+   driven by html[data-scope] which ChatSidebar.tsx sets on Personal/
+   Workspace toggle (and syncs on page load via useEffect). Matches
+   the openqcore-web identity: Personal = amber, Workspace = red.
+   ============================================================================ */
+:root {
+  --bg-base: #0a0a0b;
+  --bg-elevated: #0f1012;
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --text-primary: rgba(255, 255, 255, 0.92);
+  --text-muted: rgba(255, 255, 255, 0.45);
+
+  --accent: #fbbf24;
+  --accent-soft: rgba(251, 191, 36, 0.08);
+  --accent-hover: rgba(251, 191, 36, 0.06);
+  --accent-text: #fde68a;
+}
+
+html[data-scope="workspace"] {
+  --accent: #ef4444;
+  --accent-soft: rgba(239, 68, 68, 0.08);
+  --accent-hover: rgba(239, 68, 68, 0.06);
+  --accent-text: #fca5a5;
+}
+
+/* ============================================================================
+   Root & Body
    ============================================================================ */
 
-/* خلفية رئيسية أنعم */
+body {
+  @apply text-white;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* ============================================================================
+   Backgrounds
+   ============================================================================ */
+
 .bg-qxt-root {
   background:
-    radial-gradient(circle at 0% 0%, rgba(0, 255, 128, 0.16), transparent 55%),
+    radial-gradient(circle at 0% 0%,   rgba(0, 255, 128, 0.16),  transparent 55%),
     radial-gradient(circle at 100% 100%, rgba(56, 189, 248, 0.12), transparent 55%),
     linear-gradient(135deg, #020617 0%, #020816 45%, #020712 100%);
 }
 
-/* Grid خفيفة جدًا */
 .bg-qxt-grid {
   background-image:
     radial-gradient(circle at 1px 1px, rgba(0, 255, 128, 0.18) 1px, transparent 0),
-    linear-gradient(to right, rgba(15, 118, 110, 0.18) 1px, transparent 1px),
+    linear-gradient(to right,  rgba(15, 118, 110, 0.18) 1px, transparent 1px),
     linear-gradient(to bottom, rgba(15, 118, 110, 0.18) 1px, transparent 1px);
   background-size: 4px 4px, 40px 40px, 40px 40px;
   opacity: 0.4;
 }
 
-/* علشان نحط الجريد كـ overlay */
 .qxt-bg-layer {
   position: fixed;
   inset: 0;
@@ -32,296 +67,127 @@
   z-index: -1;
 }
 
-/* جسم الصفحة */
-body {
-  @apply text-white;
-}
-
 /* ============================================================================
-   QXT Scrollbar - مظهر احترافي
+   Scrollbar — QXT
    ============================================================================ */
 
 /* Firefox */
 .qxt-scroll {
   scrollbar-width: thin;
-  scrollbar-color: rgba(16, 185, 129, 0.6) rgba(16, 185, 129, 0.1);
+  scrollbar-color: rgba(16, 185, 129, 0.5) transparent;
 }
 
-/* Chrome, Safari, Edge */
-.qxt-scroll::-webkit-scrollbar {
-  width: 12px;
-  height: 12px;
-}
+/* Chrome / Safari / Edge */
+.qxt-scroll::-webkit-scrollbar       { width: 6px; height: 6px; }
+.qxt-scroll::-webkit-scrollbar-track { background: transparent; }
 
-/* Track (الخلفية) */
-.qxt-scroll::-webkit-scrollbar-track {
-  background: rgba(2, 7, 18, 0.3);
-  border-radius: 999px;
-}
-
-/* Thumb (الـ handle) */
 .qxt-scroll::-webkit-scrollbar-thumb {
-  background: linear-gradient(to bottom,
-      rgba(16, 185, 129, 0.5),
-      rgba(16, 185, 129, 0.7));
-  border-radius: 999px;
-  border: 2px solid transparent;
-  background-clip: padding-box;
-  min-height: 40px;
-}
-
-/* Hover */
-.qxt-scroll::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(to bottom,
-      rgba(16, 185, 129, 0.7),
-      rgba(16, 185, 129, 0.9));
-  background-clip: padding-box;
-}
-
-/* Active/Pressed */
-.qxt-scroll::-webkit-scrollbar-thumb:active {
-  background: rgba(16, 185, 129, 0.95);
-  background-clip: padding-box;
-}
-
-/* Corner (حيث يتقاطع ScrollBars) */
-.qxt-scroll::-webkit-scrollbar-corner {
-  background: transparent;
-}
-
-/* ============================================================================
-   Dark Mode Scrollbar (اختياري)
-   ============================================================================ */
-
-.dark .qxt-scroll {
-  scrollbar-color: rgba(16, 185, 129, 0.5) rgba(16, 185, 129, 0.05);
-}
-
-.dark .qxt-scroll::-webkit-scrollbar-track {
-  background: rgba(2, 7, 18, 0.5);
-}
-
-.dark .qxt-scroll::-webkit-scrollbar-thumb {
-  background: linear-gradient(to bottom,
-      rgba(16, 185, 129, 0.4),
-      rgba(16, 185, 129, 0.6));
-}
-
-.dark .qxt-scroll::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(to bottom,
-      rgba(16, 185, 129, 0.6),
-      rgba(16, 185, 129, 0.8));
-}
-
-/* ============================================================================
-   Scrollbar Colors - اختيارية (للـ light mode)
-   ============================================================================ */
-
-.light .qxt-scroll {
-  scrollbar-color: rgba(56, 189, 248, 0.6) rgba(56, 189, 248, 0.1);
-}
-
-.light .qxt-scroll::-webkit-scrollbar-track {
-  background: rgba(5, 37, 54, 0.2);
-}
-
-.light .qxt-scroll::-webkit-scrollbar-thumb {
-  background: linear-gradient(to bottom,
-      rgba(56, 189, 248, 0.5),
-      rgba(56, 189, 248, 0.7));
-}
-
-.light .qxt-scroll::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(to bottom,
-      rgba(56, 189, 248, 0.7),
-      rgba(56, 189, 248, 0.9));
-}
-
-/* ============================================================================
-   Custom Scrollbar - للمحتويات الخاصة
-   ============================================================================ */
-
-/* للـ Chat Messages Area */
-.chat-messages-scroll::-webkit-scrollbar {
-  width: 8px;
-}
-
-.chat-messages-scroll::-webkit-scrollbar-thumb {
   background: rgba(16, 185, 129, 0.4);
   border-radius: 999px;
+  transition: background 0.2s;
 }
 
-.chat-messages-scroll::-webkit-scrollbar-thumb:hover {
-  background: rgba(16, 185, 129, 0.6);
+.qxt-scroll::-webkit-scrollbar-thumb:hover  { background: rgba(16, 185, 129, 0.65); }
+.qxt-scroll::-webkit-scrollbar-thumb:active { background: rgba(16, 185, 129, 0.85); }
+.qxt-scroll::-webkit-scrollbar-corner       { background: transparent; }
+
+/* Dark */
+.dark .qxt-scroll {
+  scrollbar-color: rgba(16, 185, 129, 0.4) transparent;
 }
+.dark .qxt-scroll::-webkit-scrollbar-thumb       { background: rgba(16, 185, 129, 0.35); }
+.dark .qxt-scroll::-webkit-scrollbar-thumb:hover { background: rgba(16, 185, 129, 0.6);  }
+
+/* Light */
+.light .qxt-scroll {
+  scrollbar-color: rgba(56, 189, 248, 0.5) transparent;
+}
+.light .qxt-scroll::-webkit-scrollbar-thumb       { background: rgba(56, 189, 248, 0.4); }
+.light .qxt-scroll::-webkit-scrollbar-thumb:hover { background: rgba(56, 189, 248, 0.65); }
+
+/* Chat messages area - أرق شوية */
+.chat-messages-scroll::-webkit-scrollbar       { width: 4px; }
+.chat-messages-scroll::-webkit-scrollbar-thumb { background: rgba(16, 185, 129, 0.3); border-radius: 999px; }
+.chat-messages-scroll::-webkit-scrollbar-thumb:hover { background: rgba(16, 185, 129, 0.55); }
 
 /* ============================================================================
-   Animations وTransitions
+   Focus
    ============================================================================ */
 
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-  }
-
-  to {
-    opacity: 1;
-  }
-}
-
-@keyframes slideUp {
-  from {
-    transform: translateY(10px);
-    opacity: 0;
-  }
-
-  to {
-    transform: translateY(0);
-    opacity: 1;
-  }
-}
-
-@keyframes slideDown {
-  from {
-    transform: translateY(-10px);
-    opacity: 0;
-  }
-
-  to {
-    transform: translateY(0);
-    opacity: 1;
-  }
-}
-
-@keyframes pulse-soft {
-
-  0%,
-  100% {
-    opacity: 1;
-  }
-
-  50% {
-    opacity: 0.7;
-  }
-}
-
-.animate-fade-in {
-  animation: fadeIn 0.3s ease-in-out;
-}
-
-.animate-slide-up {
-  animation: slideUp 0.3s ease-out;
-}
-
-.animate-slide-down {
-  animation: slideDown 0.3s ease-out;
-}
-
-.animate-pulse-soft {
-  animation: pulse-soft 2s ease-in-out infinite;
-}
-
-/* ============================================================================
-   Typography
-   ============================================================================ */
-
-/* Smooth text rendering */
-body {
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  text-rendering: optimizeLegibility;
-}
-
-/* ============================================================================
-   Focus States
-   ============================================================================ */
-
-:focus-visible {
-  outline: 2px solid rgba(16, 185, 129, 0.6);
-  outline-offset: 2px;
-}
-
+:focus-visible,
 button:focus-visible,
 a:focus-visible,
 input:focus-visible,
 textarea:focus-visible,
 select:focus-visible {
-  outline: 2px solid rgba(16, 185, 129, 0.6);
+  outline: 2px solid rgba(16, 185, 129, 0.55);
   outline-offset: 2px;
 }
 
 /* ============================================================================
-   Selection Color
+   Selection
    ============================================================================ */
 
-::selection {
-  background-color: rgba(16, 185, 129, 0.3);
-  color: #fff;
+::selection      { background: rgba(16, 185, 129, 0.28); color: #fff; }
+::-moz-selection { background: rgba(16, 185, 129, 0.28); color: #fff; }
+
+/* ============================================================================
+   Utility animations
+   ============================================================================ */
+
+@keyframes qxt-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 
-::-moz-selection {
-  background-color: rgba(16, 185, 129, 0.3);
-  color: #fff;
+@keyframes qxt-slide-up {
+  from { transform: translateY(8px); opacity: 0; }
+  to   { transform: translateY(0);   opacity: 1; }
 }
 
-/* ================= AI Animations ================= */
-
-/* 🔎 scan */
-@keyframes scan {
-  0% {
-    transform: translateX(-100%);
-  }
-
-  100% {
-    transform: translateX(250%);
-  }
+@keyframes qxt-slide-down {
+  from { transform: translateY(-8px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
 }
 
-/* ✍️ typing */
-@keyframes typing {
-  0% {
-    transform: translateX(-100%);
-    opacity: 0.5;
-  }
-
-  50% {
-    transform: translateX(50%);
-    opacity: 1;
-  }
-
-  100% {
-    transform: translateX(200%);
-    opacity: 0.5;
-  }
+@keyframes qxt-pulse-soft {
+  0%, 100% { opacity: 1;   }
+  50%       { opacity: 0.6; }
 }
 
-/* ⚡ generating */
-@keyframes genBounce {
+@keyframes qxt-glow-pulse {
+  0%, 100% { box-shadow: 0 0 0   rgba(16, 185, 129, 0);   }
+  50%       { box-shadow: 0 0 14px rgba(16, 185, 129, 0.35); }
+}
 
-  0%,
-  100% {
-    transform: scaleY(0.5);
-    opacity: 0.6;
+.animate-fade-in   { animation: qxt-fade-in    0.25s ease-out; }
+.animate-slide-up  { animation: qxt-slide-up   0.25s ease-out; }
+.animate-slide-down{ animation: qxt-slide-down 0.25s ease-out; }
+.animate-pulse-soft{ animation: qxt-pulse-soft 2s ease-in-out infinite; }
+.animate-glow      { animation: qxt-glow-pulse 2s ease-in-out infinite; }
+
+/* ============================================================================
+   AIStatus — orb animation (Claude / ChatGPT style)
+   ============================================================================ */
+
+@keyframes qxt-orb {
+  0%, 100% {
+    transform: translateY(0)    scale(0.85);
+    opacity: 0.3;
   }
-
-  50% {
-    transform: scaleY(1.8);
+  45% {
+    transform: translateY(-5px) scale(1.15);
     opacity: 1;
   }
 }
-
-@keyframes glowPulse {
-
-  0%,
-  100% {
-    box-shadow: 0 0 0 rgba(16, 185, 129, 0.0);
-  }
-
-  50% {
-    box-shadow: 0 0 12px rgba(16, 185, 129, 0.4);
-  }
+/* ── إزالة outline من textarea في الفوتر ── */
+.chat-footer-textarea:focus {
+  outline: none !important;
+  box-shadow: none !important;
+  border: none !important;
 }
-
-.animate-glow {
-  animation: glowPulse 2s ease-in-out infinite;
-}
+/* ============================================================================
+   Removed / cleaned up
+   — scan, typing, genBounce كانوا مستخدمين في AIStatus القديم
+     وبقوا dead code بعد ما عملنا النسخة الجديدة
+   ============================================================================ */
