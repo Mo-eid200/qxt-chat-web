@@ -433,7 +433,7 @@ export async function fetchChatModels(
 
         const response =
           await qxtApiClient.get<ModelsResponse>(
-            "/api/v1/models",
+            "/api/v1/models/",
             {
               params: {
                 product_key:

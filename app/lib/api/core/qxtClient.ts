@@ -13,8 +13,8 @@ export const API_BASE_URL = (
 ).replace(/\/+$/, "");
 
 const DEFAULT_TIMEOUT = 30_000;
-const RETRY_DELAY     = 1_200;
-const MAX_RETRIES     = 2;
+const RETRY_BASE_DELAY = 1_000;
+const MAX_RETRIES = 4;
 
 /* =========================================================
    STORAGE KEYS
@@ -279,6 +279,19 @@ function attachAuthHeaders(
 ): InternalAxiosRequestConfig {
   config.headers = config.headers || {};
 
+  const url = config.url || "";
+
+  // Public auth endpoints must never inherit stale authentication.
+  const isPublicAuthEndpoint =
+    url.includes("/api/v1/auth/login") ||
+    url.includes("/api/v1/auth/register");
+
+  if (isPublicAuthEndpoint) {
+    delete config.headers.Authorization;
+    delete config.headers["X-API-Key"];
+    return config;
+  }
+
   const token   = getStoredToken();
   const apiKey  = getStoredApiKey();
   const runtime = getStoredContext();
@@ -331,17 +344,48 @@ function isRetryEligible(config?: RetryableConfig): boolean {
 async function retryRequest(error: AxiosError): Promise<never> {
   const config = error.config as RetryableConfig | undefined;
 
-  if (!config || !isRetryEligible(config)) return Promise.reject(error);
+  if (!config || !isRetryEligible(config)) {
+    return Promise.reject(error);
+  }
 
   config.__retryCount = config.__retryCount || 0;
 
-  if (config.__retryCount >= MAX_RETRIES) return Promise.reject(error);
+  if (config.__retryCount >= MAX_RETRIES) {
+    return Promise.reject(error);
+  }
 
   config.__retryCount += 1;
 
-  await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY));
+  // 1s → 2s → 4s → 8s
+  const delay =
+    RETRY_BASE_DELAY *
+    Math.pow(2, config.__retryCount - 1);
 
-  const client = config.__client || qxtApiClient;
+  // If the browser is offline, don't waste retries while offline.
+  if (
+    typeof window !== "undefined" &&
+    typeof navigator !== "undefined" &&
+    !navigator.onLine
+  ) {
+    await new Promise<void>((resolve) => {
+      const handleOnline = () => {
+        window.removeEventListener("online", handleOnline);
+        resolve();
+      };
+
+      window.addEventListener("online", handleOnline, {
+        once: true,
+      });
+    });
+  } else {
+    await new Promise((resolve) =>
+      setTimeout(resolve, delay)
+    );
+  }
+
+  const client =
+    config.__client || qxtApiClient;
+
   return client(config);
 }
 
@@ -365,18 +409,29 @@ function handleError(error: AxiosError): Promise<never> {
   }
 
   // Timeout
-  if (error.code === "ECONNABORTED") {
-    if (!url.includes("/api/v1/auth/me")) {
-      console.error("[API TIMEOUT]", url);
-    }
-    return Promise.reject(error);
+  if (
+  error.code === "ECONNABORTED" ||
+  error.code === "ETIMEDOUT"
+) {
+  if (!url.includes("/api/v1/auth/me")) {
+    console.error("[API TIMEOUT]", url);
   }
 
+  return retryRequest(error);
+}
+
   // Network error - retry
-  if (!error.response) {
-    console.error("[NETWORK ERROR]", url);
-    return retryRequest(error);
-  }
+ if (!error.response) {
+  console.error("[NETWORK ERROR]", {
+    url,
+    baseURL: error.config?.baseURL,
+    method: error.config?.method,
+    code: error.code,
+    message: error.message,
+  });
+
+  return retryRequest(error);
+}
 
   // كل الأخطاء التانية ما عدا 401 على /me
   if (!(status === 401 && url.includes("/api/v1/auth/me"))) {
@@ -479,4 +534,27 @@ export async function ensureWorkspaceLoaded(): Promise<string | null> {
   })();
 
   return workspacePromise;
+}
+
+/* =========================================================
+   APPLY WORKSPACE EVERYWHERE
+========================================================= */
+
+// Used right after OAuth login / workspace activation: persists the
+// workspace id via setStoredContext (which also updates the legacy
+// QXT_WORKSPACE_KEY) AND sets it on the shared axios clients' default
+// headers immediately — so the very next request fired, even before
+// any component re-renders, already carries X-Workspace-ID, instead
+// of waiting for attachAuthHeaders to pick it up from storage later.
+export function applyWorkspaceEverywhere(workspaceId: string): void {
+  setStoredContext({
+    spaceType: "workspace",
+    workspaceId,
+    activeAgentId: null,
+    companyId: getStoredCompany(),
+  });
+
+  for (const client of [qxtApiClient, qxtAuthClient, qxtChatClient]) {
+    client.defaults.headers.common["X-Workspace-ID"] = workspaceId;
+  }
 }

@@ -1,6 +1,8 @@
 "use client";
 
-import { memo } from "react";
+import { memo, useEffect, useState } from "react";
+import Lottie from "lottie-react";
+import animationData from "@/public/lottie/openqcore-loader.json";
 
 export type AIStage =
   | "thinking"
@@ -11,79 +13,60 @@ export type AIStage =
 
 interface AIStatusProps {
   stage: AIStage;
-  history?: AIStage[];
+  /** Optional contextual detail from the backend, e.g. the actual
+   * search query or city name -- shown next to the stage label
+   * ("Searching — "weather in Durrës""). */
+  detail?: string;
 }
 
 const stageLabel: Record<AIStage, string> = {
-  thinking:   "Thinking",
-  analyzing:  "Analyzing",
-  searching:  "Searching",
+  thinking: "Thinking",
+  analyzing: "Analyzing",
+  searching: "Searching",
   generating: "Generating",
-  writing:    "Writing",
+  writing: "Writing",
 };
 
-// ─── Orb animation (ChatGPT/Claude style) ────────────────────────────────────
+// ─── Component — ONE LINE ONLY, no history, no stacking ──────────────────────
 
-const ThinkingOrb = memo(() => (
-  <div className="flex items-center gap-[5px]">
-    {[0, 1, 2].map((i) => (
-      <div
-        key={i}
-        className="rounded-full"
-        style={{
-          width:  "6px",
-          height: "6px",
-          background: "rgba(255,255,255,0.55)",
-          animation: "qxt-orb 1.6s ease-in-out infinite",
-          animationDelay: `${i * 0.22}s`,
-        }}
-      />
-    ))}
-  </div>
-));
-ThinkingOrb.displayName = "ThinkingOrb";
+export const AIStatus = memo(function AIStatus({ stage, detail }: AIStatusProps) {
+  const [displayed, setDisplayed] = useState({ stage, detail });
+  const [visible, setVisible] = useState(true);
 
-// ─── Check icon ───────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (stage === displayed.stage && detail === displayed.detail) return;
+    setVisible(false);
+    const t = setTimeout(() => {
+      setDisplayed({ stage, detail });
+      setVisible(true);
+    }, 140);
+    return () => clearTimeout(t);
+  }, [stage, detail, displayed.stage, displayed.detail]);
 
-const Check = memo(() => (
-  <svg width="11" height="11" viewBox="0 0 11 11" fill="none" className="shrink-0">
-    <path
-      d="M1.5 5.5l3 3 5-5"
-      stroke="currentColor"
-      strokeWidth="1.6"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    />
-  </svg>
-));
-Check.displayName = "Check";
-
-// ─── Component ────────────────────────────────────────────────────────────────
-
-export const AIStatus = memo(function AIStatus({
-  stage,
-  history = [],
-}: AIStatusProps) {
   return (
-    <div className="flex flex-col gap-2 py-0.5 select-none">
-
-      {/* ── Completed stages ── */}
-      {history.slice(-3).map((s) => (
-        <div
-          key={s}
-          className="flex items-center gap-2 text-white/25 text-[13px]"
-        >
-          <Check />
-          <span>{stageLabel[s]}</span>
-        </div>
-      ))}
-
-      {/* ── Active stage ── */}
-      <div className="flex items-center gap-2.5 text-white/75 text-[13px] font-normal">
-        <ThinkingOrb />
-        <span>{stageLabel[stage]}</span>
+    <div className="flex items-center gap-2.5 py-1.5 select-none">
+      <div className="h-12 w-12 shrink-0 -m-2.5">
+        <Lottie
+          animationData={animationData}
+          loop
+          autoplay
+          rendererSettings={{
+            progressiveLoad: false,
+            preserveAspectRatio: "xMidYMid meet",
+          }}
+          style={{ width: 52, height: 52 }}
+        />
       </div>
 
+      <span
+        className="text-[14px] text-white/70 leading-none transition-opacity duration-150 truncate"
+        style={{ opacity: visible ? 1 : 0 }}
+      >
+        {stageLabel[displayed.stage]}
+        {displayed.detail && (
+          <span className="text-white/40"> — &ldquo;{displayed.detail}&rdquo;</span>
+        )}
+      </span>
     </div>
   );
 });

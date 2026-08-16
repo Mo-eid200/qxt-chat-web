@@ -44,11 +44,42 @@ export type AuthContextValue = {
   user: AuthUser | null;
   loadingUser: boolean;
   apiKey: string | null;
-  login: (email: string, password: string) => Promise<void>;
-  register: (email: string, password: string) => Promise<void>;
+
+  bootstrap: BootstrapResponse | null;
+  authReady: boolean;
+
+  login: (
+    email: string,
+    password: string
+  ) => Promise<LoginResponse>;
+
+  register: (
+    email: string,
+    password: string
+  ) => Promise<RegisterResponse>;
+
   logout: () => void;
-  setAuthFromToken: (token: string) => Promise<void>;
+
+  setAuthFromToken: (
+    token: string
+  ) => Promise<BootstrapResponse>;
+
+  refreshBootstrap: () => Promise<BootstrapResponse>;
   refreshMeAndKeys: () => Promise<void>;
+};
+
+export type LoginResponse = {
+  access_token: string | null;
+  token_type: string | null;
+  mfa_required: boolean;
+  challenge_id: string | null;
+};
+
+export type RegisterResponse = {
+  access_token: string;
+  token_type: string;
+  context_id: string;
+  context_type: "user";
 };
 
 // ─── App Context Value ────────────────────────────────────────────────────────
@@ -78,3 +109,45 @@ export interface RawApiKey {
   value?: string;
   api_key_value?: string;
 }
+/* ─── Application Bootstrap ──────────────────────────────────────────────── */
+
+export type BootstrapWorkspace = {
+  id: string;
+  name: string;
+  slug?: string | null;
+  description?: string | null;
+  logo_url?: string | null;
+  role: string;
+  type?: string | null;
+  subscription_status?: string | null;
+  plan_id?: number | null;
+  plan_name?: string | null;
+  seat_limit: number;
+  billing_cycle?: string | null;
+  renews_at?: string | null;
+  wallet_balance: number;
+  projects_count: number;
+  members_count: number;
+  agents_count: number;
+  chats_count: number;
+  api_requests: number;
+  created_at?: string | null;
+};
+
+export type BootstrapSubscription = {
+  has_subscription: boolean;
+  plan_name: string;
+  plan_id?: number | null;
+  monthly_credits: number;
+  billing_cycle?: string | null;
+  status: string;
+  renews_at?: string | null;
+  scheduled_plan_name?: string | null;
+  scheduled_change_at?: string | null;
+};
+
+export type BootstrapResponse = {
+  user: AuthUser;
+  workspaces: BootstrapWorkspace[];
+  personal_subscription: BootstrapSubscription;
+};

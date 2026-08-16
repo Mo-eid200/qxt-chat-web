@@ -1,10 +1,13 @@
 import React from "react";
+import { createPortal } from "react-dom";
 import {
   Folder,
   FolderOpen,
-  Plus,
-  ChevronDown,
-  ChevronRight,
+  MessageSquarePlus,
+  MoreHorizontal,
+  Pencil,
+  Share2,
+  Trash2,
 } from "lucide-react";
 
 import { cn } from "../utils/cn";
@@ -12,43 +15,6 @@ import type {
   ProjectFolder,
   SessionItem,
 } from "../types";
-
-function folderBadge(
-  kind?: string,
-  darkMode?: boolean
-): string {
-  const k = kind || "project";
-
-  if (darkMode) {
-    if (k === "project") {
-      return "bg-indigo-400/[0.10] text-indigo-100 border border-indigo-400/20";
-    }
-
-    if (k === "library") {
-      return "bg-fuchsia-400/[0.10] text-fuchsia-100 border border-fuchsia-400/20";
-    }
-
-    if (k === "code") {
-      return "bg-amber-400/[0.10] text-amber-100 border border-amber-400/20";
-    }
-
-    return "bg-emerald-400/[0.10] text-emerald-100 border border-emerald-400/20";
-  }
-
-  if (k === "project") {
-    return "bg-indigo-50 text-indigo-700 border border-indigo-200";
-  }
-
-  if (k === "library") {
-    return "bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200";
-  }
-
-  if (k === "code") {
-    return "bg-amber-50 text-amber-700 border border-amber-200";
-  }
-
-  return "bg-emerald-50 text-emerald-700 border border-emerald-200";
-}
 
 type ProjectFolderBlockProps = {
   f: ProjectFolder;
@@ -93,17 +59,27 @@ type ProjectFolderBlockProps = {
   onSelectProject?: (
     projectId: string
   ) => void;
-  SessionRowComponent: React.ComponentType<{
+  onRenameProject?: (
+    projectId: string,
+    currentTitle: string
+  ) => void;
+  onDeleteProject?: (
+    projectId: string
+  ) => void;
+  onShareProject?: (
+    projectId: string
+  ) => void;
+  SessionRowComponent
+  : React.ComponentType<{
     s: SessionItem;
     folderId: string | null;
   }>;
 };
 
-export function ProjectFolderBlock({
+function ProjectFolderBlockComponent({
   f,
   isOpen,
   darkMode,
-  rowHover,
   isLoggedIn,
   onAccountClick,
   createChatInFolder,
@@ -118,37 +94,98 @@ export function ProjectFolderBlock({
   dropProjectOver,
   q,
   list,
-  emptyBox,
   selected = false,
   onSelectProject,
+  onRenameProject,
+  onDeleteProject,
+  onShareProject,
   SessionRowComponent,
 }: ProjectFolderBlockProps) {
+  const [menuOpen, setMenuOpen] =
+    React.useState(false);
+
+  const [menuPos, setMenuPos] =
+    React.useState<{
+      top: number;
+      left: number;
+    } | null>(null);
+
+  const menuRef =
+    React.useRef<HTMLDivElement>(null);
+
   const isDropActive =
     dropProjectOver === f.id;
 
-  const cardClass = cn(
-    "rounded-2xl border transition-all duration-200 overflow-hidden",
+  React.useEffect(() => {
+    if (!menuOpen) return;
+
+    const onDocClick = (
+      e: MouseEvent
+    ) => {
+      const target = e.target as Node;
+      if (
+        menuRef.current &&
+        !menuRef.current.contains(target)
+      ) {
+        setMenuOpen(false);
+        setMenuPos(null);
+      }
+    };
+
+    document.addEventListener(
+      "mousedown",
+      onDocClick
+    );
+
+    return () =>
+      document.removeEventListener(
+        "mousedown",
+        onDocClick
+      );
+  }, [menuOpen]);
+
+  const rowClass = cn(
+    "group w-full cursor-pointer rounded-xl border px-2.5 py-1.5 transition-all duration-150",
     darkMode
-      ? "border-white/[0.06] bg-white/[0.03]"
-      : "border-black/[0.06] bg-black/[0.03]",
+      ? "border-transparent text-white/88 hover:border-white/[0.08] hover:bg-white/[0.02]"
+      : "border-transparent text-slate-800 hover:border-black/[0.08] hover:bg-black/[0.02]",
+    isOpen &&
+      (darkMode
+        ? "border-indigo-300/28 bg-indigo-500/[0.14] text-white"
+        : "border-indigo-300 bg-indigo-100 text-slate-900"),
     selected &&
       (darkMode
-        ? "ring-2 ring-indigo-400/20 bg-indigo-500/[0.06]"
-        : "ring-2 ring-indigo-300/60 bg-indigo-50/70"),
+        ? "border-indigo-300/34 text-white"
+        : "border-indigo-300 text-slate-900"),
     isDropActive &&
       (darkMode
-        ? "ring-2 ring-indigo-400/25 bg-indigo-400/[0.05]"
-        : "ring-2 ring-indigo-300 bg-indigo-50/80")
+        ? "border-indigo-300/42 bg-indigo-500/[0.10]"
+        : "border-indigo-300 bg-indigo-50")
   );
 
-  const headerClass = cn(
-    "w-full flex items-center gap-2 px-3 py-2.5 text-left transition-all",
-    rowHover
+  const actionBtn = cn(
+    "h-7 w-7 shrink-0 rounded-lg flex items-center justify-center transition",
+    darkMode
+      ? "text-white/42 hover:text-white/85 hover:bg-white/[0.06]"
+      : "text-slate-500 hover:text-slate-900 hover:bg-black/[0.05]"
   );
 
-  const handleSelectAndToggle = () => {
+  const menuClass = cn(
+    "min-w-[190px] rounded-xl border p-1 shadow-xl",
+    darkMode
+      ? "border-white/[0.08] bg-[#16171b] text-white"
+      : "border-black/10 bg-white text-slate-900"
+  );
+
+  const menuItemClass = cn(
+    "w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-[12px] text-left transition",
+    darkMode
+      ? "hover:bg-white/[0.06]"
+      : "hover:bg-black/[0.05]"
+  );
+
+  const handleToggle = () => {
     onSelectProject?.(f.id);
-
     setProjectOpen((p) => ({
       ...p,
       [f.id]: !isOpen,
@@ -156,23 +193,42 @@ export function ProjectFolderBlock({
   };
 
   return (
-    <div className={cardClass}>
+    <div className="space-y-1">
       <div
-        className={headerClass}
-        onClick={handleSelectAndToggle}
+        className={rowClass}
+        onClick={handleToggle}
         onDragOver={(
-          e: React.DragEvent<HTMLDivElement>
-        ) => {
-          e.preventDefault();
-          setDropProjectOver(f.id);
-        }}
-        onDragLeave={() =>
-          setDropProjectOver(null)
-        }
+  e: React.DragEvent<HTMLDivElement>
+) => {
+  e.preventDefault();
+  e.stopPropagation();
+
+  e.dataTransfer.dropEffect = "move";
+
+  setDropProjectOver(f.id);
+  setDropSectionOver(null);
+  setDropOverId(null);
+}}
+onDragLeave={(
+  e: React.DragEvent<HTMLDivElement>
+) => {
+  const nextTarget =
+    e.relatedTarget as Node | null;
+
+  if (
+    nextTarget &&
+    e.currentTarget.contains(nextTarget)
+  ) {
+    return;
+  }
+
+  setDropProjectOver(null);
+}}
         onDrop={(
           e: React.DragEvent<HTMLDivElement>
         ) => {
           e.preventDefault();
+          e.stopPropagation();
 
           const sid =
             draggingId ||
@@ -201,155 +257,232 @@ export function ProjectFolderBlock({
         }}
         title={L.dropToMove}
       >
-        <div
-          className={cn(
-            "h-8 w-8 rounded-xl flex items-center justify-center shrink-0",
-            darkMode
-              ? "bg-indigo-400/[0.12] text-indigo-200"
-              : "bg-indigo-100 text-indigo-700"
-          )}
-        >
-          {isOpen ? (
-            <FolderOpen className="w-4 h-4" />
-          ) : (
-            <Folder className="w-4 h-4" />
-          )}
-        </div>
+        <div className="flex items-center gap-2.5">
+          <div
+            className={cn(
+              "h-7 w-7 rounded-lg shrink-0 flex items-center justify-center",
+              darkMode
+                ? "text-white/75"
+                : "text-slate-700"
+            )}
+          >
+            {isOpen ? (
+              <FolderOpen className="w-4 h-4" />
+            ) : (
+              <Folder className="w-4 h-4" />
+            )}
+          </div>
 
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 min-w-0">
-            <div
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleToggle();
+            }}
+            className="min-w-0 flex flex-1 cursor-pointer items-center gap-2 text-left"
+          >
+            <span
               className={cn(
-                "truncate text-[13px] font-semibold leading-5",
+                "truncate text-[13px] font-medium",
                 darkMode
                   ? "text-white/92"
                   : "text-slate-900"
               )}
             >
               {f.title}
-            </div>
-
-            <span
-              className={cn(
-                "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide",
-                folderBadge(
-                  f.kind,
-                  darkMode
-                )
-              )}
-            >
-              {(
-                f.kind || "project"
-              ).toUpperCase()}
             </span>
-          </div>
+
+            {list.length > 0 ? (
+              <span
+                className={cn(
+                  "shrink-0 text-[11px]",
+                  darkMode
+                    ? "text-white/35"
+                    : "text-slate-500"
+                )}
+              >
+                {list.length}
+              </span>
+            ) : null}
+          </button>
+
+          <button
+  type="button"
+  className={cn(
+    actionBtn,
+    "opacity-0 group-hover:opacity-100 transition-opacity"
+  )}
+  onClick={(e) => {
+    e.stopPropagation();
+
+    if (!isLoggedIn) {
+      onAccountClick?.();
+      return;
+    }
+
+    onSelectProject?.(f.id);
+    createChatInFolder(f.id);
+  }}
+  title={L.newChatInProject}
+  aria-label={L.newChatInProject}
+>
+  <MessageSquarePlus className="w-4 h-4" />
+</button>
 
           <div
-            className={cn(
-              "mt-0.5 text-[11px]",
-              darkMode
-                ? "text-white/40"
-                : "text-slate-500"
-            )}
+            className="relative shrink-0"
+            ref={menuRef}
           >
-            {list.length > 0
-              ? `${list.length} chats`
-              : "No chats yet"}
+            <button
+  type="button"
+  className={cn(
+    actionBtn,
+    menuOpen
+      ? "opacity-100"
+      : "opacity-0 group-hover:opacity-100 transition-opacity"
+  )}
+  onClick={(e) => {
+    e.stopPropagation();
+
+    if (menuOpen) {
+      setMenuOpen(false);
+      setMenuPos(null);
+      return;
+    }
+
+    const rect =
+      e.currentTarget.getBoundingClientRect();
+
+    setMenuPos({
+      top: rect.top + rect.height / 2,
+      left: rect.right + 10,
+    });
+    setMenuOpen(true);
+  }}
+  title={L.more || "More"}
+  aria-label={L.more || "More"}
+>
+  <MoreHorizontal className="w-4 h-4" />
+</button>
           </div>
         </div>
-
-        <button
-          type="button"
-          className={cn(
-            "h-8 w-8 rounded-xl flex items-center justify-center transition active:scale-[0.98]",
-            darkMode
-              ? "text-white/72 hover:bg-white/[0.06]"
-              : "text-slate-700 hover:bg-black/[0.05]"
-          )}
-          onClick={(e) => {
-            e.stopPropagation();
-
-            if (!isLoggedIn) {
-              onAccountClick?.();
-              return;
-            }
-
-            onSelectProject?.(f.id);
-            createChatInFolder(f.id);
-          }}
-          title={L.newChatInProject}
-          aria-label={L.newChatInProject}
-        >
-          <Plus className="w-4 h-4" />
-        </button>
-
-        <button
-          type="button"
-          className={cn(
-            "h-8 w-8 rounded-xl flex items-center justify-center transition active:scale-[0.98]",
-            darkMode
-              ? "text-white/72 hover:bg-white/[0.06]"
-              : "text-slate-700 hover:bg-black/[0.05]"
-          )}
-          onClick={(e) => {
-            e.stopPropagation();
-            onSelectProject?.(f.id);
-            setProjectOpen((p) => ({
-              ...p,
-              [f.id]: !isOpen,
-            }));
-          }}
-          aria-label={
-            isOpen
-              ? L.collapse
-              : L.expand
-          }
-          title={
-            isOpen
-              ? L.collapse
-              : L.expand
-          }
-        >
-          {isOpen ? (
-            <ChevronDown className="w-4 h-4" />
-          ) : (
-            <ChevronRight className="w-4 h-4" />
-          )}
-        </button>
       </div>
 
+      {menuOpen &&
+      menuPos &&
+      typeof document !== "undefined"
+        ? createPortal(
+            <div
+              className={cn(
+                "fixed z-[200] -translate-y-1/2",
+                menuClass
+              )}
+              style={{
+                top: menuPos.top,
+                left: menuPos.left,
+              }}
+              onClick={(e) =>
+                e.stopPropagation()
+              }
+            >
+              <button
+                type="button"
+                className={menuItemClass}
+                onClick={() => {
+                  setMenuOpen(false);
+                  setMenuPos(null);
+                  onRenameProject?.(
+                    f.id,
+                    f.title
+                  );
+                }}
+              >
+                <Pencil className="w-4 h-4" />
+                <span>
+                  {L.renameProject ||
+                    "Rename project"}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                className={menuItemClass}
+                onClick={() => {
+                  setMenuOpen(false);
+                  setMenuPos(null);
+                  onShareProject?.(f.id);
+                }}
+              >
+                <Share2 className="w-4 h-4" />
+                <span>
+                  {L.shareProject ||
+                    "Share project"}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                className={cn(
+                  menuItemClass,
+                  darkMode
+                    ? "text-rose-300"
+                    : "text-rose-600"
+                )}
+                onClick={() => {
+                  setMenuOpen(false);
+                  setMenuPos(null);
+                  onDeleteProject?.(f.id);
+                }}
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>
+                  {L.deleteProject ||
+                    "Delete project"}
+                </span>
+              </button>
+            </div>,
+            document.body
+          )
+        : null}
+
       {isOpen && (
-        <div className="px-3 pb-3">
-          <div
-            className={cn(
-              "ml-4 border-l pl-3 space-y-1",
-              darkMode
-                ? "border-white/[0.06]"
-                : "border-black/[0.06]"
-            )}
-          >
-            {!isLoggedIn ? (
-              <div className={emptyBox}>
-                {L.signInToView}
-              </div>
-            ) : list.length === 0 ? (
-              <div className={emptyBox}>
-                {q
-                  ? L.noResults
-                  : L.noSessions}
-              </div>
-            ) : (
-              list.map((s) => (
-                <SessionRowComponent
-                  key={s.id}
-                  s={s}
-                  folderId={f.id}
-                />
-              ))
-            )}
-          </div>
+        <div className="mt-1 space-y-0">
+          {!isLoggedIn ? (
+            <div
+              className={cn(
+                "px-2 py-1 text-[12px]",
+                darkMode
+                  ? "text-white/42"
+                  : "text-slate-500"
+              )}
+            >
+              {L.signInToView}
+            </div>
+          ) : list.length === 0 ? (
+            <div
+              className={cn(
+                "px-2 py-1 text-[12px]",
+                darkMode
+                  ? "text-white/38"
+                  : "text-slate-500"
+              )}
+            >
+              {q
+                ? L.noResults
+                : "No conversations yet."}
+            </div>
+          ) : (
+            list.map((s) => (
+              <SessionRowComponent
+                key={s.id}
+                s={s}
+                folderId={f.id}
+              />
+            ))
+          )}
         </div>
       )}
     </div>
   );
 }
+export const ProjectFolderBlock = React.memo(ProjectFolderBlockComponent);

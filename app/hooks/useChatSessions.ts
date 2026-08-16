@@ -11,7 +11,7 @@ import {
   createSession,
   deleteSession,
   getSessionMessages,
-  listSessions,
+  updateSession,
 } from "@/app/lib/api/chat/sessions";
 
 import {
@@ -22,18 +22,24 @@ import {
 
 import {
   createProjectFolder,
-  fetchWorkspaceTree,
   moveSessionToFolder,
-  normalizeWorkspaceTree,
   renameSession,
   reorderFolderSessions,
 } from "@/app/lib/api/chat/sessionWorkspace";
 
 import { getChatRoute } from "@/app/lib/runtime/getChatRoute";
 
+import {
+  useSessionsQuery,
+} from "@/app/hooks/useSessionsQuery";
+
+import {
+  useWorkspaceTreeQuery,
+} from "@/app/hooks/useWorkspaceTreeQuery";
+
 import type { SessionItem }  from "@/app/qxt-chat/components/sidebar/types";
 import type { ChatMessage }  from "@/app/types/chat";
-import type { WorkspaceTree } from "@/app/types/workspace";
+import { useQueryClient } from "@tanstack/react-query";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -106,15 +112,35 @@ export function useChatSessions({
   const runtimeRef = useRef(getStoredContext());
 
   const [sessionId, setSessionIdState] = useState<string | null>(null);
-  const [sessions, setSessions]         = useState<SessionItem[]>([]);
-  const [workspaceTree, setWorkspaceTree] = useState<WorkspaceTree>({
-    folders: [],
-    unfiled: [],
-  });
-  const [workspaceBusy, setWorkspaceBusy] = useState(false);
-  const [renameOpen, setRenameOpen]       = useState(false);
-  const [renameSid, setRenameSid]         = useState<string | null>(null);
-  const [renameDraft, setRenameDraft]     = useState("");
+
+  // Close only the session currently displayed in React.
+  // Do NOT touch the scoped last-session key in localStorage.
+  // This is used when switching Personal / Workspace / Agent runtime.
+  const clearActiveSession = useCallback(() => {
+    setSessionIdState(null);
+  }, []);
+
+  // Sessions list backed by React Query — see useSessionsQuery.
+// Sessions list backed by React Query
+const { sessions, refetch: refetchSessions } =
+  useSessionsQuery(activeAgentId);
+
+// Workspace tree backed by React Query
+const { workspaceTree, refetch: refetchWorkspaceTree } =
+  useWorkspaceTreeQuery(activeAgentId);
+
+const queryClient = useQueryClient();
+
+const [workspaceBusy, setWorkspaceBusy] = useState(false);
+const [renameOpen, setRenameOpen] = useState(false);
+const [renameSid, setRenameSid] = useState<string | null>(null);
+const [renameDraft, setRenameDraft] = useState("");
+const [renameBusy, setRenameBusy] = useState(false);
+
+const [deleteOpen, setDeleteOpen] = useState(false);
+const [deleteSid, setDeleteSid] = useState<string | null>(null);
+const [deleteTitle, setDeleteTitle] = useState("");
+const [deleteBusy, setDeleteBusy] = useState(false);
 
   // ─── setSessionId ────────────────────────────────────────────────────────────
 
@@ -134,17 +160,32 @@ export function useChatSessions({
   // ─── reloadSessionMessages ───────────────────────────────────────────────────
 
   const reloadSessionMessages = useCallback(async (sid: string) => {
-    if (!isMountedRef.current) return;
+  if (!isMountedRef.current) return;
 
-    try {
-      const res = await getSessionMessages(sid);
+  try {
+    // 🔥 Perf: cache each session's raw message payload for 60s.
+    // Reopening a session already viewed within that window returns
+    // instantly from the React Query cache instead of re-hitting the
+    // backend. sendMessage() streaming still updates local `messages`
+    // state directly, unaffected by this cache.
+    const res = await queryClient.fetchQuery({
+      queryKey: ["messages", sid],
+      queryFn: () => getSessionMessages(sid),
+      staleTime: 60_000,
+    });
 
       const ui: ChatMessage[] = res
         .filter((m: any) => m.role === "user" || m.role === "assistant")
         .map((m: any) => {
           const images    = m.payload?.images    || m.images    || [];
           const videos    = m.payload?.videos    || m.videos    || [];
-          const audioUrl  = m.payload?.audio_url || m.payload?.audioUrl || m.audio_url || m.audioUrl || null;
+          const audioUrl =
+            m.payload?.audio_url ||
+            m.payload?.audioUrl ||
+            m.audio_url ||
+            m.audioUrl ||
+          (Array.isArray(m.payload?.audio) && m.payload.audio.length > 0 ? m.payload.audio[0] : null) ||
+          null;
 
           const documents = Array.isArray(m.payload?.documents)
             ? m.payload.documents.map((d: any) => ({
@@ -191,64 +232,48 @@ export function useChatSessions({
   }, [activeAgentId, isMountedRef, router, setMessages, setSessionId]);
 
   // ─── refreshSessions ─────────────────────────────────────────────────────────
-
-  const refreshSessions = useCallback(async (): Promise<SessionItem[]> => {
-    if (!getStoredToken() || !isMountedRef.current) return [];
-
-    try {
-      const items = await listSessions();
-      if (isMountedRef.current) setSessions(items as SessionItem[]);
-      return items as SessionItem[];
-    } catch (error) {
-      if (process.env.NODE_ENV === "development") {
-        console.error("[refreshSessions]", error);
-      }
-      if (isMountedRef.current) setSessions([]);
-      return [];
-    }
-  }, [isMountedRef]);
-
-  // ─── refreshWorkspace ────────────────────────────────────────────────────────
   //
-  // 🔥 FIX: this used to read runtimeRef.current.activeAgentId, a ref
-  // captured ONCE at mount time and never updated — so switching
-  // agents had zero effect on this function; it kept fetching the
-  // workspace tree scoped to whatever agent (usually none) was active
-  // when the component first mounted. That meant workspaceTree.unfiled
-  // (passed to the sidebar as `unfiledSessions`, which the sidebar
-  // prioritizes over the properly agent-scoped `sessions` list) never
-  // reflected the actual active agent, making it look like switching
-  // agents "did nothing" and leaking the general chat list into what
-  // should have been an agent-only view.
-  //
-  // Fix: use the live `activeAgentId` parameter (passed into this hook
-  // fresh on every render from AgentRuntimeContext) instead of the
-  // stale ref.
+  // Same external contract as before (returns Promise<SessionItem[]>).
 
-  const refreshWorkspace = useCallback(async () => {
-    if (!getStoredToken() || !isMountedRef.current) return;
+  // ─── refreshSessions ─────────────────────────────────────────────────────────
 
-    try {
-      setWorkspaceBusy(true);
+const refreshSessions = useCallback(async (): Promise<SessionItem[]> => {
+  if (!getStoredToken() || !isMountedRef.current) return [];
 
-      const tree = await fetchWorkspaceTree({
-        agentId: activeAgentId,
-      });
+  try {
+    // Refetch the current scoped sessions query exactly once.
+    const result = await refetchSessions();
 
-      if (isMountedRef.current) {
-        setWorkspaceTree(normalizeWorkspaceTree(tree));
-      }
-    } catch (error) {
-      if (process.env.NODE_ENV === "development") {
-        console.error("[refreshWorkspace]", error);
-      }
-      if (isMountedRef.current) {
-        setWorkspaceTree({ folders: [], unfiled: [] });
-      }
-    } finally {
-      if (isMountedRef.current) setWorkspaceBusy(false);
+    return (result.data ?? []) as SessionItem[];
+  } catch (error) {
+    if (process.env.NODE_ENV === "development") {
+      console.error("[refreshSessions]", error);
     }
-  }, [isMountedRef, activeAgentId]);
+
+    return [];
+  }
+}, [refetchSessions, isMountedRef]);
+
+// ─── refreshWorkspace ────────────────────────────────────────────────────────
+
+const refreshWorkspace = useCallback(async () => {
+  if (!getStoredToken() || !isMountedRef.current) return;
+
+  try {
+    setWorkspaceBusy(true);
+
+    // Refetch the current scoped workspace tree exactly once.
+    await refetchWorkspaceTree();
+  } catch (error) {
+    if (process.env.NODE_ENV === "development") {
+      console.error("[refreshWorkspace]", error);
+    }
+  } finally {
+    if (isMountedRef.current) {
+      setWorkspaceBusy(false);
+    }
+  }
+}, [refetchWorkspaceTree, isMountedRef]);
 
   // ─── openSession ─────────────────────────────────────────────────────────────
 
@@ -262,41 +287,114 @@ export function useChatSessions({
     }
   }, [activeAgentId, hydratedRef, isMountedRef, router, stopRequest, setSessionId]);
 
-  // ─── handleDeleteSession ──────────────────────────────────────────────────────
+  // ─── Delete ─────────────────────────────────────────────────────────────────
 
-  const handleDeleteSession = useCallback(async (sid: string) => {
-    try {
-      await deleteSession(sid);
+const handleDeleteSession = useCallback(
+  (sid: string) => {
+    const current =
+      sessions.find(
+        (x) => String(x.id) === String(sid)
+      )?.title ?? "Untitled chat";
 
-      const nextSessions = await refreshSessions();
-      await refreshWorkspace();
+    setDeleteSid(String(sid));
+    setDeleteTitle(
+      String(current || "Untitled chat")
+    );
+    setDeleteOpen(true);
+  },
+  [sessions]
+);
 
-      if (sessionId !== sid || !isMountedRef.current) return;
+const closeDeleteDialog = useCallback(() => {
+  if (deleteBusy) return;
 
-      setMessages([]);
+  setDeleteOpen(false);
+  setDeleteSid(null);
+  setDeleteTitle("");
+}, [deleteBusy]);
 
-      if (nextSessions.length > 0) {
-        const firstId = String((nextSessions[0] as any).id);
-        setSessionId(firstId);
-        hydratedRef.current = false;
-        router.replace(getChatRoute({ sessionId: firstId, agentId: activeAgentId }));
-        await reloadSessionMessages(firstId);
-        return;
-      }
+const confirmDeleteSession = useCallback(async () => {
+  if (!deleteSid || deleteBusy) return;
 
-      setSessionId(null);
-      hydratedRef.current = false;
-      router.replace(getChatRoute({ sessionId: null, agentId: activeAgentId }));
-    } catch (error) {
-      if (process.env.NODE_ENV === "development") {
-        console.error("[handleDeleteSession]", error);
-      }
+  const sid = deleteSid;
+
+  try {
+    setDeleteBusy(true);
+
+    await deleteSession(sid);
+
+    const [nextSessions] = await Promise.all([
+      refreshSessions(),
+      refreshWorkspace(),
+    ]);
+
+    setDeleteOpen(false);
+    setDeleteSid(null);
+    setDeleteTitle("");
+
+    if (
+      sessionId !== sid ||
+      !isMountedRef.current
+    ) {
+      return;
     }
-  }, [
-    activeAgentId, hydratedRef, isMountedRef,
-    refreshSessions, refreshWorkspace, reloadSessionMessages,
-    router, sessionId, setMessages, setSessionId,
-  ]);
+
+    setMessages([]);
+
+    if (nextSessions.length > 0) {
+      const firstId = String(
+        (nextSessions[0] as any).id
+      );
+
+      setSessionId(firstId);
+      hydratedRef.current = false;
+
+      router.replace(
+        getChatRoute({
+          sessionId: firstId,
+          agentId: activeAgentId,
+        })
+      );
+
+      await reloadSessionMessages(firstId);
+      return;
+    }
+
+    setSessionId(null);
+    hydratedRef.current = false;
+
+    router.replace(
+      getChatRoute({
+        sessionId: null,
+        agentId: activeAgentId,
+      })
+    );
+  } catch (error) {
+    if (process.env.NODE_ENV === "development") {
+      console.error(
+        "[confirmDeleteSession]",
+        error
+      );
+    }
+  } finally {
+    if (isMountedRef.current) {
+      setDeleteBusy(false);
+    }
+  }
+}, [
+  activeAgentId,
+  deleteBusy,
+  deleteSid,
+  hydratedRef,
+  isMountedRef,
+  refreshSessions,
+  refreshWorkspace,
+  reloadSessionMessages,
+  router,
+  sessionId,
+  setMessages,
+  setSessionId,
+]);
 
   // ─── handleNewChatInFolder ────────────────────────────────────────────────────
 
@@ -315,8 +413,7 @@ export function useChatSessions({
         router.replace(getChatRoute({ sessionId: String(created.id), agentId: activeAgentId }));
       }
 
-      await refreshSessions();
-      await refreshWorkspace();
+      await Promise.all([refreshSessions(), refreshWorkspace()]);
     } catch (error) {
       if (process.env.NODE_ENV === "development") {
         console.error("[handleNewChatInFolder]", error);
@@ -349,8 +446,7 @@ export function useChatSessions({
         router.replace(getChatRoute({ sessionId: String(created.id), agentId: activeAgentId }));
       }
 
-      await refreshSessions();
-      await refreshWorkspace();
+      await Promise.all([refreshSessions(), refreshWorkspace()]);
     } catch (error) {
       if (process.env.NODE_ENV === "development") {
         console.error("[handleNewChat]", error);
@@ -379,23 +475,45 @@ export function useChatSessions({
     setRenameDraft("");
   }, []);
 
-  const submitRenameDialog = useCallback(async () => {
-    if (!renameSid) return;
-    const title = renameDraft.trim();
-    if (!title) return;
+const submitRenameDialog = useCallback(async () => {
+  if (!renameSid || renameBusy) return;
 
-    try {
-      await renameSession(renameSid, title);
-      await refreshSessions();
-      await refreshWorkspace();
-      closeRenameDialog();
-    } catch (error) {
-      if (process.env.NODE_ENV === "development") {
-        console.error("[submitRenameDialog]", error);
-      }
-      alert("Could not rename.");
+  const title = renameDraft.trim();
+
+  if (!title) return;
+
+  try {
+    setRenameBusy(true);
+
+    await renameSession(renameSid, title);
+
+    await Promise.all([
+      refreshSessions(),
+      refreshWorkspace(),
+    ]);
+
+    closeRenameDialog();
+  } catch (error) {
+    if (process.env.NODE_ENV === "development") {
+      console.error(
+        "[submitRenameDialog]",
+        error
+      );
     }
-  }, [closeRenameDialog, refreshSessions, refreshWorkspace, renameDraft, renameSid]);
+  } finally {
+    if (isMountedRef.current) {
+      setRenameBusy(false);
+    }
+  }
+}, [
+  closeRenameDialog,
+  isMountedRef,
+  refreshSessions,
+  refreshWorkspace,
+  renameBusy,
+  renameDraft,
+  renameSid,
+]);
 
   // ─── ensureSession ────────────────────────────────────────────────────────────
 
@@ -409,16 +527,37 @@ export function useChatSessions({
     }
 
     const created = await createChatSession();
-    const sid = created?.id;
-    if (!sid) throw new Error("Session creation failed");
+const sid = created?.id;
+if (!sid) throw new Error("Session creation failed");
 
-    if (isMountedRef.current) {
-      setSessionId(String(sid));
-      router.replace(getChatRoute({ sessionId: String(sid), agentId: activeAgentId }));
-    }
+if (isMountedRef.current) {
+  setSessionId(String(sid));
 
-    return String(sid);
-  }, [activeAgentId, createChatSession, isMountedRef, router, sessionId, setSessionId]);
+  router.replace(
+    getChatRoute({
+      sessionId: String(sid),
+      agentId: activeAgentId,
+    })
+  );
+
+  // Sync sidebar immediately after creating the first session.
+  await Promise.all([
+    refreshSessions(),
+    refreshWorkspace(),
+  ]);
+}
+
+return String(sid);
+  }, [
+  activeAgentId,
+  createChatSession,
+  isMountedRef,
+  router,
+  sessionId,
+  setSessionId,
+  refreshSessions,
+  refreshWorkspace,
+]);
 
   // ─── Workspace actions ────────────────────────────────────────────────────────
 
@@ -450,8 +589,7 @@ export function useChatSessions({
     try {
       setWorkspaceBusy(true);
       await moveSessionToFolder(String(sid), folderId);
-      await refreshWorkspace();
-      await refreshSessions();
+      await Promise.all([refreshWorkspace(), refreshSessions()]);
     } catch (error) {
       if (process.env.NODE_ENV === "development") {
         console.error("[handleMoveSessionToFolder]", error);
@@ -477,33 +615,168 @@ export function useChatSessions({
     }
   }, [refreshWorkspace]);
 
-  // ─── Return ───────────────────────────────────────────────────────────────────
 
-  return {
-    sessionId,
-    setSessionId,
+  // ─── Pin / Unpin ──────────────────────────────────────────────────────────────
+
+const handleTogglePin = useCallback(
+  async (sid: string) => {
+    const session = sessions.find(
+      (item) => String(item.id) === String(sid)
+    );
+
+    if (!session) return;
+
+    const nextPinned = !Boolean(session.pinned);
+
+    try {
+      await updateSession(String(sid), {
+        pinned: nextPinned,
+      });
+
+      await Promise.all([
+        refreshSessions(),
+        refreshWorkspace(),
+      ]);
+    } catch (error) {
+      if (process.env.NODE_ENV === "development") {
+        console.error(
+          "[handleTogglePin]",
+          error
+        );
+      }
+    }
+  },
+  [
     sessions,
-    workspaceTree,
-    workspaceBusy,
-    renameOpen,
-    renameSid,
-    renameDraft,
-    setRenameDraft,
-    createChatSession,
-    reloadSessionMessages,
     refreshSessions,
     refreshWorkspace,
-    openSession,
-    handleDeleteSession,
-    handleNewChatInFolder,
-    handleNewChat,
-    openRenameDialog,
-    closeRenameDialog,
-    submitRenameDialog,
-    ensureSession,
-    handleCreateProjectFolder,
-    handleMoveSessionToFolder,
-    handleReorderFolderSessions,
-    runtime: runtimeRef.current, // ✅ stable reference
-  };
+  ]
+);
+
+// ─── Star / Unstar ────────────────────────────────────────────────────────────
+
+const handleToggleStar = useCallback(
+  async (sid: string) => {
+    const session = sessions.find(
+      (item) => String(item.id) === String(sid)
+    );
+
+    if (!session) return;
+
+    const nextStarred = !Boolean(session.starred);
+
+    try {
+      await updateSession(String(sid), {
+        starred: nextStarred,
+      });
+
+      await Promise.all([
+        refreshSessions(),
+        refreshWorkspace(),
+      ]);
+    } catch (error) {
+      if (process.env.NODE_ENV === "development") {
+        console.error(
+          "[handleToggleStar]",
+          error
+        );
+      }
+    }
+  },
+  [
+    sessions,
+    refreshSessions,
+    refreshWorkspace,
+  ]
+);
+
+
+// ─── Mark unread / read ───────────────────────────────────────────────────────
+
+const handleToggleUnread = useCallback(
+  async (sid: string) => {
+    const session = sessions.find(
+      (item) => String(item.id) === String(sid)
+    );
+
+    if (!session) return;
+
+    const nextMarkedUnread =
+      !Boolean(session.marked_unread);
+
+    try {
+      await updateSession(String(sid), {
+        marked_unread: nextMarkedUnread,
+      });
+
+      await Promise.all([
+        refreshSessions(),
+        refreshWorkspace(),
+      ]);
+    } catch (error) {
+      if (process.env.NODE_ENV === "development") {
+        console.error(
+          "[handleToggleUnread]",
+          error
+        );
+      }
+    }
+  },
+  [
+    sessions,
+    refreshSessions,
+    refreshWorkspace,
+  ]
+);
+
+  // ─── Return ───────────────────────────────────────────────────────────────────
+
+ return {
+  sessionId,
+  setSessionId,
+  clearActiveSession,
+
+  sessions,
+  workspaceTree,
+  workspaceBusy,
+
+  // Rename
+  renameOpen,
+  renameSid,
+  renameDraft,
+  renameBusy,
+  setRenameDraft,
+  openRenameDialog,
+  closeRenameDialog,
+  submitRenameDialog,
+
+  // Delete
+  deleteOpen,
+  deleteSid,
+  deleteTitle,
+  deleteBusy,
+  closeDeleteDialog,
+  confirmDeleteSession,
+
+  // Sessions
+  createChatSession,
+  reloadSessionMessages,
+  refreshSessions,
+  refreshWorkspace,
+  openSession,
+  handleDeleteSession,
+  handleTogglePin,
+  handleToggleStar,
+  handleNewChatInFolder,
+  handleNewChat,
+  ensureSession,
+  handleToggleUnread,
+
+  // Workspace
+  handleCreateProjectFolder,
+  handleMoveSessionToFolder,
+  handleReorderFolderSessions,
+
+  runtime: runtimeRef.current,
+};
 }

@@ -6,15 +6,23 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
+import { useAuth } from "./AuthContext";
 import { useAgentRuntime } from "./AgentRuntimeContext";
 
 import {
   qxtApiClient,
   getStoredToken,
 } from "../lib/api/core/qxtClient";
+
+import type {
+  BootstrapWorkspace,
+} from "../lib/api/auth/auth.types";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 export type WorkspacePlan =
   | "Free Plan"
@@ -60,6 +68,7 @@ type CreateWorkspacePayload = {
 type WorkspaceContextValue = {
   loading: boolean;
   initialized: boolean;
+
   workspaces: Workspace[];
   activeWorkspace: Workspace | null;
   isWorkspaceMode: boolean;
@@ -86,57 +95,322 @@ type WorkspaceContextValue = {
   ) => Promise<void>;
 };
 
-const WorkspaceContext =
-  createContext<WorkspaceContextValue | null>(
-    null
-  );
+// ─── Context ──────────────────────────────────────────────────────────────────
 
+const WorkspaceContext =
+  createContext<WorkspaceContextValue | null>(null);
+
+// ─── Cache ────────────────────────────────────────────────────────────────────
+//
+// IMPORTANT:
+//
+// - Cache is per authenticated user.
+// - Cache contains workspace display metadata only.
+// - No JWT.
+// - No API key.
+// - No secrets.
+//
+// Bootstrap remains authoritative.
+// Cache only improves perceived startup speed.
+//
+
+const WORKSPACES_CACHE_VERSION = "v2";
+const CACHE_TTL_MS = 30 * 60_000; // 30 minutes
+
+type WorkspacesCacheEntry = {
+  version: typeof WORKSPACES_CACHE_VERSION;
+  userId: string;
+  workspaces: Workspace[];
+  cachedAt: number;
+};
+
+function getWorkspaceCacheKey(
+  userId: string
+): string {
+  return `qxt_workspaces_cache_${WORKSPACES_CACHE_VERSION}:${userId}`;
+}
+
+function readWorkspacesCache(
+  userId: string | null
+): Workspace[] | null {
+  if (
+    typeof window === "undefined" ||
+    !userId
+  ) {
+    return null;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(
+      getWorkspaceCacheKey(userId)
+    );
+
+    if (!raw) {
+      return null;
+    }
+
+    const parsed =
+      JSON.parse(raw) as WorkspacesCacheEntry;
+
+    if (
+      parsed.version !== WORKSPACES_CACHE_VERSION ||
+      parsed.userId !== userId ||
+      !Array.isArray(parsed.workspaces)
+    ) {
+      return null;
+    }
+
+    if (
+      Date.now() - parsed.cachedAt >
+      CACHE_TTL_MS
+    ) {
+      window.localStorage.removeItem(
+        getWorkspaceCacheKey(userId)
+      );
+
+      return null;
+    }
+
+    return parsed.workspaces;
+  } catch {
+    return null;
+  }
+}
+
+function writeWorkspacesCache(
+  userId: string | null,
+  workspaces: Workspace[]
+): void {
+  if (
+    typeof window === "undefined" ||
+    !userId
+  ) {
+    return;
+  }
+
+  try {
+    const entry: WorkspacesCacheEntry = {
+      version: WORKSPACES_CACHE_VERSION,
+      userId,
+      workspaces,
+      cachedAt: Date.now(),
+    };
+
+    window.localStorage.setItem(
+      getWorkspaceCacheKey(userId),
+      JSON.stringify(entry)
+    );
+  } catch {
+    // Cache is a performance optimization only.
+  }
+}
+
+function clearWorkspacesCache(
+  userId: string | null
+): void {
+  if (
+    typeof window === "undefined" ||
+    !userId
+  ) {
+    return;
+  }
+
+  try {
+    window.localStorage.removeItem(
+      getWorkspaceCacheKey(userId)
+    );
+  } catch {
+    // Ignore cache failures.
+  }
+}
+
+// ─── Normalization ────────────────────────────────────────────────────────────
+
+function normalizePlan(
+  value: unknown
+): WorkspacePlan {
+  const raw = String(value ?? "")
+    .trim()
+    .toLowerCase();
+
+  if (
+    raw === "enterprise" ||
+    raw === "enterprise plan"
+  ) {
+    return "Enterprise Plan";
+  }
+
+  if (
+    raw === "business" ||
+    raw === "business plan"
+  ) {
+    return "Business Plan";
+  }
+
+  if (
+    raw === "pro" ||
+    raw === "pro plan"
+  ) {
+    return "Pro Plan";
+  }
+
+  if (
+    raw === "starter" ||
+    raw === "starter plan"
+  ) {
+    return "Starter Plan";
+  }
+
+  return "Free Plan";
+}
+
+function normalizeRole(
+  value: unknown
+): WorkspaceRole {
+  switch (
+    String(value ?? "")
+      .trim()
+      .toLowerCase()
+  ) {
+    case "owner":
+      return "owner";
+
+    case "admin":
+      return "admin";
+
+    case "developer":
+      return "developer";
+
+    case "viewer":
+      return "viewer";
+
+    default:
+      return "member";
+  }
+}
+
+function normalizeType(
+  value: unknown
+): WorkspaceType {
+  switch (
+    String(value ?? "")
+      .trim()
+      .toLowerCase()
+  ) {
+    case "enterprise":
+      return "Enterprise";
+
+    case "team":
+    case "workspace":
+      return "Team";
+
+    default:
+      return "Personal";
+  }
+}
+
+/**
+ * Normalizes either:
+ *
+ * 1. /api/v1/bootstrap workspace shape
+ * 2. legacy /api/v1/workspaces shape
+ * 3. create/update workspace response
+ *
+ * Bootstrap fields:
+ *   plan_name
+ *   wallet_balance
+ *   seat_limit
+ *
+ * Legacy frontend fields:
+ *   plan
+ *   balance
+ *   seats
+ */
 function normalizeWorkspace(
-  raw: any
+  raw: Partial<BootstrapWorkspace> &
+    Record<string, unknown>
 ): Workspace {
   return {
     id: String(raw?.id ?? ""),
+
     name:
-      raw?.name ||
-      "Untitled Workspace",
+      typeof raw?.name === "string" &&
+      raw.name.trim()
+        ? raw.name
+        : "Untitled Workspace",
+
     slug:
-      raw?.slug ||
-      undefined,
+      typeof raw?.slug === "string"
+        ? raw.slug
+        : undefined,
+
     logo_url:
-      raw?.logo_url ||
-      null,
+      typeof raw?.logo_url === "string"
+        ? raw.logo_url
+        : null,
+
     description:
-      raw?.description ||
-      null,
-    role:
-      raw?.role ||
-      "member",
-    type:
-      raw?.type ||
-      "Personal",
-    plan:
-      raw?.plan ||
-      "Free Plan",
+      typeof raw?.description === "string"
+        ? raw.description
+        : null,
+
+    role: normalizeRole(raw?.role),
+
+    type: normalizeType(raw?.type),
+
+    plan: normalizePlan(
+      raw?.plan_name ?? raw?.plan
+    ),
+
     balance: Number(
-      raw?.balance || 0
+      raw?.wallet_balance ??
+      raw?.balance ??
+      0
     ),
+
     seats: Number(
-      raw?.seats || 1
+      raw?.seat_limit ??
+      raw?.seats ??
+      1
     ),
+
     projects_count: Number(
-      raw?.projects_count || 0
+      raw?.projects_count ?? 0
     ),
+
     members_count: Number(
-      raw?.members_count || 1
+      raw?.members_count ?? 1
     ),
+
     api_requests: Number(
-      raw?.api_requests || 0
+      raw?.api_requests ?? 0
     ),
+
     created_at:
-      raw?.created_at ||
-      undefined,
+      typeof raw?.created_at === "string"
+        ? raw.created_at
+        : undefined,
   };
 }
+
+function normalizeWorkspaceList(
+  raw: unknown
+): Workspace[] {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+
+  return raw
+    .map((item) =>
+      normalizeWorkspace(
+        (item ?? {}) as Partial<BootstrapWorkspace> &
+          Record<string, unknown>
+      )
+    )
+    .filter((workspace) => !!workspace.id);
+}
+
+// ─── Provider ─────────────────────────────────────────────────────────────────
 
 export function WorkspaceProvider({
   children,
@@ -144,137 +418,255 @@ export function WorkspaceProvider({
   children: React.ReactNode;
 }): React.ReactElement {
   const {
+    user,
+    bootstrap,
+    authReady,
+    loadingUser,
+  } = useAuth();
+
+  const {
     spaceType,
     activeWorkspaceId,
     switchToWorkspace,
     switchToPersonal: switchRuntimeToPersonal,
   } = useAgentRuntime();
 
-  const [
-    loading,
-    setLoading,
-  ] = useState(true);
+  const userId =
+    user?.id != null
+      ? String(user.id)
+      : null;
 
-  const [
+  const [workspaces, setWorkspaces] =
+    useState<Workspace[]>([]);
+
+  const [loading, setLoading] =
+    useState(true);
+
+  const [initialized, setInitialized] =
+    useState(false);
+
+  const hydratedUserRef =
+    useRef<string | null>(null);
+
+  // ── Cache hydration ────────────────────────────────────────────────────────
+  //
+  // localStorage is read once when authenticated identity becomes known.
+  // It gives us an immediate list while bootstrap is resolving/propagating.
+  //
+
+  useEffect(() => {
+    if (!authReady) {
+      return;
+    }
+
+    if (!userId) {
+      setWorkspaces([]);
+      setLoading(false);
+      setInitialized(true);
+      hydratedUserRef.current = null;
+      return;
+    }
+
+    if (
+      hydratedUserRef.current === userId
+    ) {
+      return;
+    }
+
+    hydratedUserRef.current = userId;
+
+    const cached =
+      readWorkspacesCache(userId);
+
+    if (cached) {
+      setWorkspaces(cached);
+    }
+  }, [authReady, userId]);
+
+  // ── Bootstrap synchronization ──────────────────────────────────────────────
+  //
+  // This is the normal authoritative startup path.
+  //
+  // NO /workspaces request is performed here.
+  //
+
+  useEffect(() => {
+    if (!authReady) {
+      return;
+    }
+
+    if (!userId) {
+      setWorkspaces([]);
+      setLoading(false);
+      setInitialized(true);
+      return;
+    }
+
+    if (loadingUser) {
+      return;
+    }
+
+    if (!bootstrap) {
+      setLoading(false);
+      setInitialized(true);
+      return;
+    }
+
+    const normalized =
+      normalizeWorkspaceList(
+        bootstrap.workspaces
+      );
+
+    setWorkspaces(normalized);
+
+    writeWorkspacesCache(
+      userId,
+      normalized
+    );
+
+    setLoading(false);
+    setInitialized(true);
+  }, [
+    authReady,
+    loadingUser,
+    bootstrap,
+    userId,
+  ]);
+
+  // ── Active workspace synchronization ──────────────────────────────────────
+  //
+  // Pure local synchronization.
+  //
+  // Changing active workspace does NOT fetch /workspaces.
+  //
+
+  const activeWorkspace =
+    useMemo<Workspace | null>(() => {
+      if (
+        spaceType !== "workspace" ||
+        !activeWorkspaceId
+      ) {
+        return null;
+      }
+
+      return (
+        workspaces.find(
+          (workspace) =>
+            String(workspace.id) ===
+            String(activeWorkspaceId)
+        ) ?? null
+      );
+    }, [
+      spaceType,
+      activeWorkspaceId,
+      workspaces,
+    ]);
+
+  // If stored runtime points at a workspace that no longer exists,
+  // recover locally without another list request.
+  useEffect(() => {
+    if (!initialized) {
+      return;
+    }
+
+    if (spaceType !== "workspace") {
+      return;
+    }
+
+    if (!activeWorkspaceId) {
+      switchRuntimeToPersonal();
+      return;
+    }
+
+    if (activeWorkspace) {
+      return;
+    }
+
+    if (workspaces.length > 0) {
+      switchToWorkspace(
+        workspaces[0].id
+      );
+
+      return;
+    }
+
+    switchRuntimeToPersonal();
+  }, [
     initialized,
-    setInitialized,
-  ] = useState(false);
-
-  const [
-    workspaces,
-    setWorkspaces,
-  ] = useState<Workspace[]>(
-    []
-  );
-
-  const [
+    spaceType,
+    activeWorkspaceId,
     activeWorkspace,
-    setActiveWorkspace,
-  ] = useState<Workspace | null>(
-    null
-  );
+    workspaces,
+    switchToWorkspace,
+    switchRuntimeToPersonal,
+  ]);
+
+  // ── Explicit server refresh ────────────────────────────────────────────────
+  //
+  // This is deliberately NOT called by an effect.
+  //
+  // Use only when:
+  // - user explicitly refreshes
+  // - server-side state may have changed externally
+  // - another client/device changed memberships
+  //
 
   const refreshWorkspaces =
-    useCallback(
-      async (): Promise<void> => {
-        try {
-          setLoading(true);
+    useCallback(async (): Promise<void> => {
+      if (!userId) {
+        setWorkspaces([]);
+        setLoading(false);
+        clearWorkspacesCache(userId);
+        return;
+      }
 
-          const token =
-            getStoredToken();
+      const token = getStoredToken();
 
-          if (!token) {
-            setWorkspaces([]);
-            setActiveWorkspace(null);
-            return;
-          }
+      if (!token) {
+        setWorkspaces([]);
+        setLoading(false);
+        clearWorkspacesCache(userId);
+        return;
+      }
 
-          if (spaceType !== "workspace") {
-  setWorkspaces([]);
-  setActiveWorkspace(null);
-  return;
-}
+      try {
+        setLoading(true);
 
-          const response =
-            await qxtApiClient.get(
-              "/api/v1/workspaces"
-            );
-
-          const raw =
-            response.data?.items ||
-            response.data?.workspaces ||
-            [];
-
-          const normalized: Workspace[] =
-            Array.isArray(raw)
-              ? raw.map(
-                  normalizeWorkspace
-                )
-              : [];
-
-          setWorkspaces(normalized);
-
-          if (
-            spaceType ===
-              "workspace" &&
-            activeWorkspaceId
-          ) {
-            const matched =
-              normalized.find(
-                (workspace) =>
-                  String(
-                    workspace.id
-                  ) ===
-                  String(
-                    activeWorkspaceId
-                  )
-              ) || null;
-
-            if (matched) {
-              setActiveWorkspace(
-                matched
-              );
-            } else if (
-              normalized.length > 0
-            ) {
-              const fallback =
-                normalized[0];
-              setActiveWorkspace(
-                fallback
-              );
-              switchToWorkspace(
-                fallback.id
-              );
-            } else {
-              setActiveWorkspace(
-                null
-              );
-              switchRuntimeToPersonal();
-            }
-
-            return;
-          }
-
-          setActiveWorkspace(null);
-        } catch (error) {
-          console.error(
-            "❌ Failed loading workspaces",
-            error
+        const response =
+          await qxtApiClient.get(
+            "/api/v1/workspaces"
           );
-          setWorkspaces([]);
-          setActiveWorkspace(null);
-        } finally {
-          setLoading(false);
-          setInitialized(true);
-        }
-      },
-      [
-        spaceType,
-        activeWorkspaceId,
-        switchToWorkspace,
-        switchRuntimeToPersonal,
-      ]
-    );
+
+        const raw =
+          response.data?.items ??
+          response.data?.workspaces ??
+          response.data ??
+          [];
+
+        const normalized =
+          normalizeWorkspaceList(raw);
+
+        setWorkspaces(normalized);
+
+        writeWorkspacesCache(
+          userId,
+          normalized
+        );
+      } catch (error) {
+        console.error(
+          "❌ Failed loading workspaces",
+          error
+        );
+
+        // Keep current/cache state.
+        throw error;
+      } finally {
+        setLoading(false);
+        setInitialized(true);
+      }
+    }, [userId]);
+
+  // ── Switch workspace ──────────────────────────────────────────────────────
 
   const switchWorkspace =
     useCallback(
@@ -286,23 +678,23 @@ export function WorkspaceProvider({
             (item) =>
               String(item.id) ===
               String(workspaceId)
-          ) || null;
+          ) ?? null;
 
         if (!workspace) {
           console.warn(
             "[Workspace] Not found:",
             workspaceId
           );
+
           return;
         }
 
-        setActiveWorkspace(
-          workspace
-        );
+        // Immediate local UI switch.
         switchToWorkspace(
           workspace.id
         );
 
+        // Server activation is a mutation, not a list refresh.
         try {
           await qxtApiClient.post(
             `/api/v1/workspaces/${workspace.id}/activate`
@@ -320,13 +712,14 @@ export function WorkspaceProvider({
       ]
     );
 
+  // ── Personal mode ─────────────────────────────────────────────────────────
+
   const switchToPersonal =
     useCallback((): void => {
-      setActiveWorkspace(null);
       switchRuntimeToPersonal();
-    }, [
-      switchRuntimeToPersonal,
-    ]);
+    }, [switchRuntimeToPersonal]);
+
+  // ── Create ────────────────────────────────────────────────────────────────
 
   const createWorkspace =
     useCallback(
@@ -341,24 +734,46 @@ export function WorkspaceProvider({
 
         const workspace =
           normalizeWorkspace(
-            response.data
-              ?.workspace ||
-              response.data
+            (
+              response.data?.workspace ??
+              response.data ??
+              {}
+            ) as Partial<BootstrapWorkspace> &
+              Record<string, unknown>
           );
 
-        setWorkspaces((prev) => [
-          workspace,
-          ...prev,
-        ]);
+        setWorkspaces((previous) => {
+          const next = [
+            workspace,
+            ...previous.filter(
+              (item) =>
+                item.id !== workspace.id
+            ),
+          ];
 
+          writeWorkspacesCache(
+            userId,
+            next
+          );
+
+          return next;
+        });
+
+        // We already have the new workspace locally.
+        // No GET /workspaces required.
         await switchWorkspace(
           workspace.id
         );
 
         return workspace;
       },
-      [switchWorkspace]
+      [
+        userId,
+        switchWorkspace,
+      ]
     );
+
+  // ── Update ────────────────────────────────────────────────────────────────
 
   const updateWorkspace =
     useCallback(
@@ -374,27 +789,34 @@ export function WorkspaceProvider({
 
         const updated =
           normalizeWorkspace(
-            response.data
-              ?.workspace ||
-              response.data
+            (
+              response.data?.workspace ??
+              response.data ??
+              {}
+            ) as Partial<BootstrapWorkspace> &
+              Record<string, unknown>
           );
 
-        setWorkspaces((prev) =>
-          prev.map((workspace) =>
-            workspace.id === updated.id
-              ? updated
-              : workspace
-          )
-        );
+        setWorkspaces((previous) => {
+          const next =
+            previous.map((workspace) =>
+              workspace.id === updated.id
+                ? updated
+                : workspace
+            );
 
-        setActiveWorkspace((prev) =>
-          prev?.id === updated.id
-            ? updated
-            : prev
-        );
+          writeWorkspacesCache(
+            userId,
+            next
+          );
+
+          return next;
+        });
       },
-      []
+      [userId]
     );
+
+  // ── Delete ────────────────────────────────────────────────────────────────
 
   const removeWorkspace =
     useCallback(
@@ -405,89 +827,57 @@ export function WorkspaceProvider({
           `/api/v1/workspaces/${workspaceId}`
         );
 
-        const filtered =
-          workspaces.filter(
-            (workspace) =>
-              workspace.id !==
-              workspaceId
+        setWorkspaces((previous) => {
+          const next =
+            previous.filter(
+              (workspace) =>
+                workspace.id !== workspaceId
+            );
+
+          writeWorkspacesCache(
+            userId,
+            next
           );
 
-        setWorkspaces(filtered);
+          return next;
+        });
 
         if (
-          activeWorkspace?.id ===
-          workspaceId
+          String(activeWorkspaceId) ===
+          String(workspaceId)
         ) {
-          setActiveWorkspace(null);
           switchRuntimeToPersonal();
         }
       },
       [
-        workspaces,
-        activeWorkspace,
+        userId,
+        activeWorkspaceId,
         switchRuntimeToPersonal,
       ]
     );
 
-  useEffect(() => {
-    refreshWorkspaces().catch(
-      (error) => {
-        console.error(
-          "❌ Workspace bootstrap failed",
-          error
-        );
-      }
-    );
-  }, [refreshWorkspaces]);
-
-  useEffect(() => {
-    if (
-      spaceType !==
-      "workspace"
-    ) {
-      setActiveWorkspace(null);
-      return;
-    }
-
-    if (!activeWorkspaceId) {
-      setActiveWorkspace(null);
-      return;
-    }
-
-    const matched =
-      workspaces.find(
-        (workspace) =>
-          String(workspace.id) ===
-          String(
-            activeWorkspaceId
-          )
-      ) || null;
-
-    setActiveWorkspace(
-      matched
-    );
-  }, [
-    spaceType,
-    activeWorkspaceId,
-    workspaces,
-  ]);
+  // ── Derived state ─────────────────────────────────────────────────────────
 
   const isWorkspaceMode =
-    spaceType ===
-      "workspace" &&
-    !!activeWorkspace;
+    spaceType === "workspace" &&
+    activeWorkspace !== null;
+
+  // ── Context value ─────────────────────────────────────────────────────────
 
   const value =
     useMemo<WorkspaceContextValue>(
       () => ({
         loading,
         initialized,
+
         workspaces,
         activeWorkspace,
         isWorkspaceMode,
+
         refreshWorkspaces,
         switchWorkspace,
         switchToPersonal,
+
         createWorkspace,
         removeWorkspace,
         updateWorkspace,
@@ -516,11 +906,11 @@ export function WorkspaceProvider({
   );
 }
 
+// ─── Hook ─────────────────────────────────────────────────────────────────────
+
 export function useWorkspace(): WorkspaceContextValue {
   const context =
-    useContext(
-      WorkspaceContext
-    );
+    useContext(WorkspaceContext);
 
   if (!context) {
     throw new Error(

@@ -65,6 +65,10 @@ export type ChatSession = {
   last_message?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
+  pinned?: boolean;
+  starred?: boolean;
+  marked_unread?: boolean;
+  sort_index?: number;
 };
 
 export type ChatResponse = {
@@ -377,6 +381,18 @@ function normalizeSession(
     folder_id:
       raw.folder_id ||
       null,
+      pinned:
+  Boolean(raw.pinned),
+
+starred:
+  Boolean(raw.starred),
+
+marked_unread:
+  Boolean(raw.marked_unread),
+
+sort_index:
+  Number(raw.sort_index ?? 0),
+
     last_message:
       raw.last_message ||
       null,
@@ -607,6 +623,32 @@ export async function deleteSession(
   } catch (error) {
     console.error(
       "[deleteSession]",
+      error
+    );
+
+    parseApiError(error);
+  }
+}
+
+export type UpdateSessionPayload = {
+  title?: string;
+  pinned?: boolean;
+  starred?: boolean;
+  marked_unread?: boolean;
+};
+
+export async function updateSession(
+  sessionId: string,
+  payload: UpdateSessionPayload
+): Promise<void> {
+  try {
+    await qxtChatClient.patch(
+      `${CHAT_API_PREFIX}/sessions/${sessionId}`,
+      payload
+    );
+  } catch (error) {
+    console.error(
+      "[updateSession]",
       error
     );
 

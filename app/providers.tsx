@@ -13,8 +13,16 @@ import { ModelsProvider } from "./context/ModelsContext";
 import { AgentRuntimeProvider } from "./context/AgentRuntimeContext";
 import { WorkspaceProvider } from "./context/WorkspaceContext";
 
-const queryClient =
-  new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 30_000,
+      gcTime: 5 * 60_000,
+      refetchOnWindowFocus: false,
+      retry: 1,
+    },
+  },
+});
 
 export default function Providers({
   children,
@@ -24,16 +32,16 @@ export default function Providers({
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-  <AgentRuntimeProvider>
-    <WorkspaceProvider>
-      <AppProvider>
-        <ModelsProvider>
-          {children}
-        </ModelsProvider>
-      </AppProvider>
-    </WorkspaceProvider>
-  </AgentRuntimeProvider>
-</AuthProvider>
+        <AgentRuntimeProvider>
+          <WorkspaceProvider>
+            <AppProvider>
+              <ModelsProvider>
+                {children}
+              </ModelsProvider>
+            </AppProvider>
+          </WorkspaceProvider>
+        </AgentRuntimeProvider>
+      </AuthProvider>
     </QueryClientProvider>
   );
 }

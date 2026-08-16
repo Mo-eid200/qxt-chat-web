@@ -1,9 +1,13 @@
-import React from "react";
 import {
   Pencil,
   Trash2,
   Check,
   Link as LinkIcon,
+  Pin,
+  PinOff,
+  Star,
+  Mail,
+  MailOpen,
 } from "lucide-react";
 
 type SessionMenuProps = {
@@ -12,6 +16,13 @@ type SessionMenuProps = {
   onCopySessionLink?: (sid: string) => void;
   onRenameSession?: (sid: string) => void;
   onDeleteSession?: (sid: string) => void;
+  onTogglePin?: (sid: string) => void;
+  onToggleStar?: (sid: string) => void;
+  onToggleUnread?: (sid: string) => void;
+
+  pinned?: boolean;
+  starred?: boolean;
+  markedUnread?: boolean;
   setMenu: (m: any) => void;
   menuItem: string;
   L: Record<string, string>;
@@ -24,6 +35,12 @@ export function SessionMenu({
   onCopySessionLink,
   onRenameSession,
   onDeleteSession,
+  onTogglePin,
+  onToggleStar,
+  onToggleUnread,
+  pinned = false,
+  starred = false,
+  markedUnread = false,
   setMenu,
   L,
 }: SessionMenuProps) {
@@ -66,6 +83,63 @@ export function SessionMenu({
       </button>
 
       <div className="my-1 border-t border-white/[0.08]" />
+      <button
+  type="button"
+  className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2 text-left text-[13px] text-white/70 transition-all hover:bg-amber-300/[0.08] hover:text-white"
+  onClick={() => {
+    onTogglePin?.(sId);
+    setMenu(null);
+  }}
+>
+  {pinned ? (
+    <PinOff className="w-4 h-4" />
+  ) : (
+    <Pin className="w-4 h-4" />
+  )}
+
+  <span>
+    {pinned ? "Unpin" : "Pin"}
+  </span>
+</button>
+
+<button
+  type="button"
+  className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2 text-left text-[13px] text-white/70 transition-all hover:bg-amber-300/[0.08] hover:text-white"
+  onClick={() => {
+    onToggleStar?.(sId);
+    setMenu(null);
+  }}
+>
+  <Star
+    className="w-4 h-4"
+    fill={starred ? "currentColor" : "none"}
+  />
+
+  <span>
+    {starred ? "Unstar" : "Star"}
+  </span>
+</button>
+
+<button
+  type="button"
+  className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2 text-left text-[13px] text-white/70 transition-all hover:bg-amber-300/[0.08] hover:text-white"
+  onClick={() => {
+    onToggleUnread?.(sId);
+    setMenu(null);
+  }}
+>
+  {markedUnread ? (
+    <MailOpen className="w-4 h-4" />
+  ) : (
+    <Mail className="w-4 h-4" />
+  )}
+
+  <span>
+    {markedUnread
+      ? "Mark as read"
+      : "Mark as unread"}
+  </span>
+</button>
 
       <button
         type="button"

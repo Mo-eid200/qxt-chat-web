@@ -12,9 +12,7 @@ import Image from "next/image";
 
 import {
   X,
-  LogOut,
   ChevronRight,
-  Sparkles,
   ShieldCheck,
   Cpu,
   Layers3,
@@ -23,15 +21,8 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 
 import { useAuth } from "../../context/AuthContext";
-import { useApp }  from "../../context/AppContext";
 
-import { PersonalUpgradeModal } from "./PersonalUpgradeModal";
-import { WorkspaceUpgradeModal } from "./WorkspaceUpgradeModal";
 
-import {
-  setStoredWorkspace,
-  qxtAuthClient,
-} from "../../lib/api/core/qxtClient";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -49,19 +40,8 @@ export default function AuthModal({ open, onClose, lang }: AuthModalProps) {
   const isAr = lang === "ar";
 
   // ── Auth: user identity + actions ─────────────────────────────────────────
-  const { user, login, register, logout, loadingUser } = useAuth();
+  const { login, register, loadingUser } = useAuth();
 
-  // ── App: billing + subscription (NOT from useAuth) ────────────────────────
-  const {
-    plan,
-    status,
-    balance,
-    fairUseLimit,
-    monthlyUsed,
-    renewalDate,
-    daysRemaining,
-    refresh,
-  } = useApp();
 
   // ── Local state ───────────────────────────────────────────────────────────
   const [mode, setMode]                       = useState<AuthMode>("signin");
@@ -71,18 +51,12 @@ export default function AuthModal({ open, onClose, lang }: AuthModalProps) {
   const [passwordConfirm, setPasswordConfirm] = useState("");
   const [submitting, setSubmitting]           = useState(false);
   const [errorMsg, setErrorMsg]               = useState<string | null>(null);
-  const [showUpgrade, setShowUpgrade]         = useState(false);
+  const closeAfterAuthRef = useRef(false);
 
   const isMounted  = useRef(true);
-  const isLoggedIn = !!user;
   const isSignin   = mode === "signin";
 
-  const displayName =
-    (user as any)?.display_name ||
-    (user as any)?.full_name    ||
-    (user as any)?.username     ||
-    user?.email?.split("@")[0]  ||
-    "User";
+
 
   // ── Effects ───────────────────────────────────────────────────────────────
 
@@ -98,118 +72,129 @@ export default function AuthModal({ open, onClose, lang }: AuthModalProps) {
   }, [open]);
 
   useEffect(() => {
-    if (!open) {
-      setSubmitting(false);
-      setErrorMsg(null);
-    }
-  }, [open]);
+  if (!open) {
+    closeAfterAuthRef.current = false;
+    setSubmitting(false);
+    setErrorMsg(null);
+  }
+}, [open]);
 
   // ── Handlers ──────────────────────────────────────────────────────────────
 
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-    if (loadingUser || submitting) return;
+async function handleSubmit(e: FormEvent) {
+  e.preventDefault();
 
+  if (loadingUser || submitting) return;
+
+  setErrorMsg(null);
+  closeAfterAuthRef.current = false;
+
+  const cleanEmail = email.trim().toLowerCase();
+  const cleanPass = password;
+
+  if (!cleanEmail || !cleanPass) {
+    setErrorMsg("Please enter your email and password.");
+    return;
+  }
+
+  if (!isSignin && cleanPass.length < 8) {
+    setErrorMsg("Password must be at least 8 characters.");
+    return;
+  }
+
+  if (!isSignin && cleanPass !== passwordConfirm) {
+    setErrorMsg("Passwords do not match.");
+    return;
+  }
+
+  try {
+    setSubmitting(true);
+
+    const response = isSignin
+      ? await login(cleanEmail, cleanPass)
+      : await register(cleanEmail, cleanPass);
+
+    // Authentication is not complete yet if MFA is required.
+    if ("mfa_required" in response && response.mfa_required) {
+      if (!response.challenge_id) {
+        throw new Error("Missing MFA challenge ID");
+      }
+
+      // TODO: show MFA verification UI.
+      return;
+    }
+
+    if (!isMounted.current) return;
+
+    // Clear form only after successful authentication.
+    setFullName("");
+    setEmail("");
+    setPassword("");
+    setPasswordConfirm("");
     setErrorMsg(null);
 
-    const cleanEmail = email.trim().toLowerCase();
-    const cleanPass  = password;
+    // Prevent any intermediate authenticated UI from flashing.
+    closeAfterAuthRef.current = true;
 
-    if (!cleanEmail || !cleanPass) {
-      setErrorMsg("Please enter your email and password.");
-      return;
-    }
-
-    if (!isSignin && cleanPass.length < 8) {
-      setErrorMsg("Password must be at least 8 characters.");
-      return;
-    }
-
-    if (!isSignin && cleanPass !== passwordConfirm) {
-      setErrorMsg("Passwords do not match.");
-      return;
-    }
-
-    try {
-      setSubmitting(true);
-
-      let response: any;
-
-      if (isSignin) {
-        response = await login(cleanEmail, cleanPass);
-      } else {
-        response = await register(cleanEmail, cleanPass);
-      }
-
-      // Persist workspace context
-      if (response?.workspace_id) {
-        setStoredWorkspace(String(response.workspace_id));
-      } else {
-        const ctx = await qxtAuthClient.get("/api/v1/auth/context", {
-          timeout: 10000,
-        });
-        if (ctx.data?.workspace_id) {
-          setStoredWorkspace(String(ctx.data.workspace_id));
-        }
-      }
-
-      // Refresh billing after login
-      await refresh();
-
-      if (!isMounted.current) return;
-
-      setFullName("");
-      setEmail("");
-      setPassword("");
-      setPasswordConfirm("");
-      onClose();
-    } catch (err: any) {
-      if (!isMounted.current) return;
-
-      const data    = err?.response?.data;
-      let message   =
-        data?.detail ??
-        data?.error  ??
-        err?.message ??
-        "Something went wrong.";
-
-      if (Array.isArray(message)) {
-        message = message
-          .map((e: any) => {
-            const loc = Array.isArray(e?.loc) ? e.loc.join(".") : "field";
-            return `${loc}: ${e?.msg || "invalid"}`;
-          })
-          .join(" | ");
-      }
-
-      setErrorMsg(String(message));
-    } finally {
-      if (isMounted.current) setSubmitting(false);
-    }
-  }
-
-  function handleLogout() {
-    logout();
+    // Close exactly once after auth is fully complete.
     onClose();
+
+  } catch (err: any) {
+    if (!isMounted.current) return;
+
+    const data = err?.response?.data;
+
+    let message =
+      data?.detail ??
+      data?.error?.message ??
+      data?.error ??
+      err?.message ??
+      "Something went wrong.";
+
+    if (Array.isArray(message)) {
+      message = message
+        .map((item: any) => {
+          const loc = Array.isArray(item?.loc)
+            ? item.loc.join(".")
+            : "field";
+
+          return `${loc}: ${item?.msg || "invalid"}`;
+        })
+        .join("\n");
+    }
+
+    setErrorMsg(String(message));
+
+  } finally {
+    if (isMounted.current) {
+      setSubmitting(false);
+    }
   }
+}
+  function startOAuth(provider: "google" | "outlook" | "apple") {
+  if (typeof window === "undefined") return;
 
-  function startOAuth(provider: "google" | "outlook") {
-    if (typeof window === "undefined") return;
+  const baseURL =
+    process.env.NEXT_PUBLIC_QXT_API_BASE_URL ||
+    "http://localhost:8000";
 
-    const baseURL =
-      process.env.NEXT_PUBLIC_QXT_API_BASE_URL || "http://127.0.0.1:8000";
+  const returnTo = `${window.location.origin}/auth/callback`;
 
-    const redirectUri = `${window.location.origin}/auth/callback`;
+  const paths = {
+    google: "/api/v1/auth/oauth/google/start",
+    outlook: "/api/v1/auth/oauth/outlook/start",
+    apple: "/api/v1/auth/oauth/apple/start",
+  } as const;
 
-    const path =
-      provider === "google"
-        ? "/api/v1/auth/oauth/google/start"
-        : "/api/v1/auth/oauth/outlook/start";
+  const params = new URLSearchParams({
+    return_to: returnTo,
+    next: "/",
+  });
 
-    window.location.assign(
-      `${baseURL}${path}?redirect_uri=${encodeURIComponent(redirectUri)}`
-    );
-  }
+  window.location.assign(
+    `${baseURL}${paths[provider]}?${params.toString()}`
+  );
+}
 
   // ── Static data ───────────────────────────────────────────────────────────
 
@@ -222,8 +207,8 @@ export default function AuthModal({ open, onClose, lang }: AuthModalProps) {
     []
   );
 
-  const title    = isLoggedIn ? "ChatQXT · OQC Account"              : "Welcome to ChatQXT AI";
-  const subtitle = isLoggedIn ? "Manage your subscription and workspace." : "Sign in to access your workspace.";
+  const title = "Welcome to ChatQXT AI";
+  const subtitle = "Sign in to access your workspace.";
 
   if (!open) return null;
 
@@ -287,7 +272,7 @@ export default function AuthModal({ open, onClose, lang }: AuthModalProps) {
                 <div className="flex items-center gap-3">
                   <div className="relative h-[58px] w-[58px] shrink-0">
                     <Image
-                      src="/chatqxt.png"
+                      src="/corelogo.png"
                       alt="ChatQXT"
                       fill
                       sizes="58px"
@@ -303,8 +288,7 @@ export default function AuthModal({ open, onClose, lang }: AuthModalProps) {
                   </div>
                 </div>
 
-                {!isLoggedIn && (
-                  <div className="hidden items-center gap-2 mr-12 lg:flex">
+                <div className="hidden items-center gap-2 mr-12 lg:flex">
                     {stats.map(({ icon: Icon, label }) => (
                       <div
                         key={label}
@@ -319,114 +303,10 @@ export default function AuthModal({ open, onClose, lang }: AuthModalProps) {
                       </div>
                     ))}
                   </div>
-                )}
               </div>
             </div>
 
-            {/* ── Logged in view ── */}
-            {isLoggedIn ? (
-              <div className="px-5 pb-5 space-y-5">
-                {/* User info */}
-                <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-4">
-                  <div className="flex items-center gap-3">
-                    <div className="
-                      flex h-11 w-11 items-center justify-center
-                      rounded-full bg-gradient-to-br from-slate-600 to-slate-800
-                      text-sm font-semibold
-                    ">
-                      {user?.email?.[0]?.toUpperCase() || "U"}
-                    </div>
-
-                    <div>
-                      <div className="text-sm font-medium">{displayName}</div>
-                      <div className="mt-1 text-xs text-white/45">{user?.email}</div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Billing info */}
-                <div className="space-y-4 rounded-xl border border-white/[0.06] bg-white/[0.02] p-4">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-white/50">Plan</span>
-                    <span className="text-sm font-medium">{plan || "Free"}</span>
-                  </div>
-
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-white/50">Q-Power</span>
-                    <span className="text-sm font-medium">{balance ?? 0}</span>
-                  </div>
-
-                  {fairUseLimit > 0 && (
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-white/50">Usage</span>
-                      <span className="text-sm font-medium">
-                        {monthlyUsed} / {fairUseLimit}
-                      </span>
-                    </div>
-                  )}
-
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-white/50">Renewal date</span>
-                    <span className="text-sm font-medium">
-                      {renewalDate
-                        ? new Date(renewalDate).toLocaleDateString("en-US")
-                        : "Not set"}
-                    </span>
-                  </div>
-
-                  {status === "free" && (
-                    <button
-                      onClick={() => setShowUpgrade(true)}
-                      className="
-                        mt-2 flex h-10 w-full items-center justify-center gap-2
-                        rounded-lg bg-white
-                        text-sm font-semibold text-black
-                        transition-all duration-200 hover:bg-white/90
-                      "
-                    >
-                      <Sparkles className="h-4 w-4" />
-                      Upgrade to Pro
-                    </button>
-                  )}
-
-                  {daysRemaining > 0 && (
-                    <div className="text-right text-xs text-white/40">
-                      {daysRemaining} days remaining
-                    </div>
-                  )}
-                </div>
-
-                {/* Actions */}
-                <div className="flex gap-3">
-                  <button
-                    onClick={onClose}
-                    className="
-                      flex h-10 flex-1 items-center justify-center
-                      rounded-lg bg-white
-                      text-sm font-medium text-black
-                      transition-all duration-200 hover:bg-white/90
-                    "
-                  >
-                    Back
-                  </button>
-
-                  <button
-                    onClick={handleLogout}
-                    className="
-                      flex h-10 items-center justify-center gap-2
-                      rounded-lg border border-white/[0.06] bg-white/[0.02]
-                      px-4 text-sm text-white/70
-                      transition-all duration-200 hover:bg-white/[0.05]
-                    "
-                  >
-                    <LogOut className="h-4 w-4" />
-                    Logout
-                  </button>
-                </div>
-              </div>
-
-            ) : (
-              /* ── Guest / login view ── */
+              {/* Guest / login view */}
               <div className="px-6 pb-6">
                 <div className="
                   rounded-2xl border border-white/[0.06]
@@ -459,7 +339,7 @@ export default function AuthModal({ open, onClose, lang }: AuthModalProps) {
                     <div className="flex items-center gap-3">
                       <div className="relative h-[52px] w-[52px] shrink-0">
                         <Image
-                          src="/chatqxt.png"
+                          src="/corelogo.png"
                           alt="ChatQXT"
                           fill priority sizes="52px"
                           className="object-contain"
@@ -691,35 +571,9 @@ export default function AuthModal({ open, onClose, lang }: AuthModalProps) {
                   </p>
                 </div>
               </div>
-            )}
           </motion.div>
         </motion.div>
       </AnimatePresence>
-
-      {/* Upgrade modal */}
-      {showUpgrade && (
-        <PersonalUpgradeModal
-          open={showUpgrade}
-          onClose={() => setShowUpgrade(false)}
-          onUpgrade={async (planId) => {
-            try {
-              const res = await fetch("/api/v1/billing/subscribe", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                credentials: "include",
-                body: JSON.stringify({ plan_id: planId }),
-              });
-
-              const data = await res.json();
-              if (data?.checkout_url) {
-                window.location.href = data.checkout_url;
-              }
-            } catch (err) {
-              console.error("Upgrade failed", err);
-            }
-          }}
-        />
-      )}
     </>
   );
 }

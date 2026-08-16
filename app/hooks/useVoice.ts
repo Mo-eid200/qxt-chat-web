@@ -61,6 +61,12 @@ export const useVoice = ({
     const mimeTypeRef = useRef<string>("audio/webm");
     const hasSentRef = useRef(false);
 
+    const sessionIdRef = useRef<string | undefined>(sessionId);
+
+    useEffect(() => {
+    sessionIdRef.current = sessionId;
+     }, [sessionId]);
+
     // stable id per voice turn (recording -> stt text -> assistant text)
     const turnIdRef = useRef<string | null>(null);
 
@@ -141,11 +147,31 @@ export const useVoice = ({
             audioElementRef.current = audio;
 
             audio.onended = () => {
-                cleanupAudio();
-                setIsProcessing(false);
-                setLiveStatus("✅ Done");
-                onCompleteAction?.();
-            };
+    cleanupAudio();
+    setIsProcessing(false);
+    setLiveStatus("✅ Done");
+    onCompleteAction?.();
+
+    const meta = lastMetaRef.current;
+    if (meta?.session_id && meta?.assistant_request_id) {
+        fetch(
+            `${API_BASE}/api/v1/voice/message-audio/${meta.session_id}/${meta.assistant_request_id}`,
+            { headers: buildAuthHeaders(), credentials: "include" }
+        )
+            .then((res) => (res.ok ? res.json() : null))
+            .then((data) => {
+                if (data?.audio_url) {
+                    onMessageAction?.({
+                        id: `assistant-${meta.assistant_request_id}`,
+                        role: "assistant",
+                        kind: "audio_update",
+                        audioUrl: data.audio_url,
+                    });
+                }
+            })
+            .catch(() => {});
+    }
+};
 
             audio.onerror = () => {
                 console.warn("[VOICE] ⚠️ audio error (ignored)");
@@ -171,77 +197,85 @@ export const useVoice = ({
         [cleanupAudio, onCompleteAction]
     );
 
-    // ========================
-    // 📩 1) META REQUEST (STT + LLM) -> JSON
-    // ========================
-    const fetchMeta = useCallback(
-        async (blob: Blob, turnId: string): Promise<MetaResponse> => {
-            if (!sessionId) throw new Error("No session ID");
-            if (!blob?.size) throw new Error("Empty blob");
+   // ========================
+// 📩 1) META REQUEST (STT + LLM) -> JSON
+// ========================
+const fetchMeta = useCallback(
+    async (blob: Blob, turnId: string): Promise<MetaResponse> => {
+        const sid = sessionIdRef.current;
 
-            setLiveStatus("🧠 Transcribing & generating text...");
+        if (!sid) throw new Error("No session ID");
+        if (!blob?.size) throw new Error("Empty blob");
 
-            const formData = new FormData();
-            formData.append(
-                "file",
-                blob,
-                `voice.${mimeTypeRef.current.includes("webm") ? "webm" : "mp4"}`
-            );
-            formData.append("model", selectedModel?.id || "gpt-4o-mini");
-            formData.append("session_id", sessionId);
+        setLiveStatus("🧠 Transcribing & generating text...");
 
-            const { signal, timeoutId } = abortWithTimeout();
+        const formData = new FormData();
+        formData.append(
+            "file",
+            blob,
+            `voice.${mimeTypeRef.current.includes("webm") ? "webm" : "mp4"}`
+        );
+        formData.append("model", selectedModel?.id || "gpt-4o-mini");
+        formData.append("session_id", sid);
 
-            const res = await fetch(`${API_BASE}/api/v1/voice/chat/meta`, {
-                method: "POST",
-                body: formData,
-                signal,
-                headers: {
-                    ...buildAuthHeaders(),
-                },
-                credentials: "include",
-            }).finally(() => clearTimeout(timeoutId));
+        const { signal, timeoutId } = abortWithTimeout();
 
-            if (!res.ok) {
-                const t = await res.text().catch(() => "");
-                throw new Error(t || `${res.status}`);
-            }
+        const res = await fetch(`${API_BASE}/api/v1/voice/chat/meta`, {
+            method: "POST",
+            body: formData,
+            signal,
+            headers: {
+                ...buildAuthHeaders(),
+            },
+            credentials: "include",
+        }).finally(() => clearTimeout(timeoutId));
 
-            const meta = (await res.json()) as MetaResponse;
+        if (!res.ok) {
+            const t = await res.text().catch(() => "");
+            throw new Error(t || `${res.status}`);
+        }
 
-            // validate minimal fields
-            if (!meta?.user_text || !meta?.response_text) {
-                throw new Error("Invalid meta response (missing user_text/response_text)");
-            }
+        const meta = (await res.json()) as MetaResponse;
 
-            lastMetaRef.current = meta;
+        if (!meta?.user_text || !meta?.response_text) {
+            throw new Error("Invalid meta response (missing user_text/response_text)");
+        }
 
-            // ✅ Update bubbles immediately from JSON (NO HEADERS NEEDED)
-            onMessageAction?.({
-                id: turnId,
-                role: "user",
-                kind: "text",
-                text: meta.user_text,
-            });
+        lastMetaRef.current = meta;
 
-            onMessageAction?.({
-                id: `assistant-${turnId}`,
-                role: "assistant",
-                kind: "text",
-                text: meta.response_text,
-            });
+        onMessageAction?.({
+            id: turnId,
+            role: "user",
+            kind: "text",
+            text: meta.user_text,
+        });
 
-            return meta;
-        },
-        [API_BASE, abortWithTimeout, buildAuthHeaders, onMessageAction, selectedModel?.id, sessionId]
-    );
+        onMessageAction?.({
+            id: `assistant-${turnId}`,
+            role: "assistant",
+            kind: "text",
+            text: meta.response_text,
+        });
+
+        return meta;
+    },
+    [
+        API_BASE,
+        abortWithTimeout,
+        buildAuthHeaders,
+        onMessageAction,
+        selectedModel?.id,
+    ]
+);
 
     // ========================
     // 🎧 2) AUDIO REQUEST (TTS STREAM) -> MP3
     // ========================
     const fetchAudio = useCallback(
         async (blob: Blob, meta: MetaResponse) => {
-            if (!sessionId) throw new Error("No session ID");
+            const sid = sessionIdRef.current;
+            if (!sid) throw new Error("No session ID");
+            
             if (!blob?.size) throw new Error("Empty blob");
 
             setLiveStatus("🔊 Generating voice...");
@@ -253,7 +287,7 @@ export const useVoice = ({
                 `voice.${mimeTypeRef.current.includes("webm") ? "webm" : "mp4"}`
             );
             formData.append("model", selectedModel?.id || "gpt-4o-mini");
-            formData.append("session_id", sessionId);
+            formData.append("session_id", sid);
 
             // ✅ send meta to skip STT+LLM on backend
             formData.append("user_text", meta.user_text);
@@ -280,7 +314,7 @@ export const useVoice = ({
 
             await playAudioResponse(res);
         },
-        [API_BASE, abortWithTimeout, buildAuthHeaders, playAudioResponse, selectedModel?.id, sessionId]
+        [API_BASE, abortWithTimeout, buildAuthHeaders, playAudioResponse, selectedModel?.id]
     );
 
     // ========================
@@ -288,7 +322,8 @@ export const useVoice = ({
     // ========================
     const sendAudioToBackend = useCallback(
         async (blob: Blob) => {
-            if (!sessionId) throw new Error("No session ID");
+            const sid = sessionIdRef.current;
+            if (!sid) throw new Error("No session ID");
             if (!blob?.size) throw new Error("Empty blob");
 
             if (isSendingRef.current) return;
@@ -308,131 +343,142 @@ export const useVoice = ({
                 isSendingRef.current = false;
             }
         },
-        [fetchAudio, fetchMeta, sessionId]
+        [fetchAudio, fetchMeta]
     );
 
     // ========================
-    // 🎤 START/STOP RECORDING (TOGGLE)
-    // ========================
-    const startRecording = useCallback(async () => {
-        // STOP
-        if (mediaRecorderRef.current?.state === "recording") {
-            const duration = Date.now() - startTimeRef.current;
-            if (duration < 1000) return;
+// 🎤 START/STOP RECORDING (TOGGLE)
+// ========================
+const startRecording = useCallback(async (forcedSessionId?: string) => {
 
-            setLiveStatus("⏹️ Sending...");
-            try {
-                mediaRecorderRef.current.stop();
-            } catch { }
+    if (forcedSessionId) {
+        sessionIdRef.current = forcedSessionId;
+    }
+    // STOP
+    if (mediaRecorderRef.current?.state === "recording") {
+        const duration = Date.now() - startTimeRef.current;
+        if (duration < 1000) return;
 
-            try {
-                streamRef.current?.getTracks().forEach((t) => t.stop());
-            } catch { }
+        setLiveStatus("⏹️ Sending...");
+        try {
+            mediaRecorderRef.current.stop();
+        } catch {}
 
-            mediaRecorderRef.current = null;
-            streamRef.current = null;
-            onStreamAction?.(null);
-            setIsRecording(false);
-            return;
+        try {
+            streamRef.current?.getTracks().forEach((t) => t.stop());
+        } catch {}
+
+        mediaRecorderRef.current = null;
+        streamRef.current = null;
+        onStreamAction?.(null);
+        setIsRecording(false);
+        return;
+    }
+
+    // START
+    cleanupAudio();
+    chunksRef.current = [];
+
+    setError(null);
+    setIsProcessing(false);
+    setLiveStatus("🎤 Recording...");
+    hasSentRef.current = false;
+    isCancelledRef.current = false;
+
+    const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            channelCount: 1,
+            sampleRate: 16000,
+        },
+    });
+
+    streamRef.current = stream;
+    onStreamAction?.(stream);
+
+    const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm;codecs=opus"
+        : MediaRecorder.isTypeSupported("audio/webm")
+            ? "audio/webm"
+            : "audio/mp4";
+
+    mimeTypeRef.current = mime;
+
+    const recorder = new MediaRecorder(stream, { mimeType: mime });
+    mediaRecorderRef.current = recorder;
+
+    recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+            chunksRef.current.push(event.data);
         }
+    };
 
-        // START
-        cleanupAudio();
-        chunksRef.current = [];
+    recorder.onstop = () => {
+        if (hasSentRef.current) return;
+        hasSentRef.current = true;
 
-        setError(null);
-        setIsProcessing(false);
-        setLiveStatus("🎤 Recording...");
-        hasSentRef.current = false;
-        isCancelledRef.current = false;
+        setTimeout(() => {
+            try {
+                const audioBlob = new Blob(chunksRef.current, { type: mime });
 
-        // new stable turn id
-        const turnId = `voice-${Date.now()}`;
-        turnIdRef.current = turnId;
-
-        // show recording bubble immediately
-        onMessageAction?.({
-            id: turnId,
-            role: "user",
-            kind: "recording",
-            text: "",
-        });
-
-        const stream = await navigator.mediaDevices.getUserMedia({
-            audio: {
-                echoCancellation: true,
-                noiseSuppression: true,
-                autoGainControl: true,
-                channelCount: 1,
-                sampleRate: 16000,
-            },
-        });
-
-        streamRef.current = stream;
-        onStreamAction?.(stream);
-
-        const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-            ? "audio/webm;codecs=opus"
-            : MediaRecorder.isTypeSupported("audio/webm")
-                ? "audio/webm"
-                : "audio/mp4";
-
-        mimeTypeRef.current = mime;
-
-        const recorder = new MediaRecorder(stream, { mimeType: mime });
-        mediaRecorderRef.current = recorder;
-
-        recorder.ondataavailable = (event) => {
-            if (event.data.size > 0) chunksRef.current.push(event.data);
-        };
-
-        recorder.onstop = () => {
-            if (hasSentRef.current) return;
-            hasSentRef.current = true;
-
-            setTimeout(() => {
-                try {
-                    const audioBlob = new Blob(chunksRef.current, { type: mime });
-
-                    if (audioBlob.size < MIN_AUDIO_SIZE) {
-                        setError("Recording too short");
-                        setLiveStatus("");
-                        setIsProcessing(false);
-                        return;
-                    }
-
-                    // create assistant waiting bubble immediately after stop
-                    const tid = turnIdRef.current || turnId;
-                    onMessageAction?.({
-                        id: `assistant-${tid}`,
-                        role: "assistant",
-                        kind: "stream_update",
-                        text: "...",
-                    });
-
-                    if (!isCancelledRef.current) {
-                        void sendAudioToBackend(audioBlob);
-                    } else {
-                        isCancelledRef.current = false;
-                    }
-                } catch (err) {
-                    const msg = err instanceof Error ? err.message : "Unknown";
-                    setError(msg);
+                if (audioBlob.size < MIN_AUDIO_SIZE) {
+                    setError("Recording too short");
                     setLiveStatus("");
                     setIsProcessing(false);
+                    return;
                 }
-            }, 0);
-        };
 
-        recorder.onerror = (event: any) => {
-            setError(`Recording error: ${event?.error || "Unknown"}`);
-            setLiveStatus("");
-        };
+                const tid = turnIdRef.current!;
+                onMessageAction?.({
+                    id: `assistant-${tid}`,
+                    role: "assistant",
+                    kind: "stream_update",
+                    text: "...",
+                });
 
-        startTimeRef.current = Date.now();
-        recorder.start();
-        setIsRecording(true);
-    }, [cleanupAudio, onMessageAction, sendAudioToBackend, onStreamAction]);
+                if (!isCancelledRef.current) {
+                    void sendAudioToBackend(audioBlob);
+                } else {
+                    isCancelledRef.current = false;
+                }
+            } catch (err) {
+                const msg =
+                    err instanceof Error ? err.message : "Unknown";
+
+                setError(msg);
+                setLiveStatus("");
+                setIsProcessing(false);
+            }
+        }, 0);
+    };
+
+    recorder.onerror = (event: any) => {
+        setError(`Recording error: ${event?.error || "Unknown"}`);
+        setLiveStatus("");
+    };
+
+    startTimeRef.current = Date.now();
+
+    recorder.start();
+
+    // ✅ التسجيل بدأ فعلاً
+    setIsRecording(true);
+    console.log("🔴 [SET IS RECORDING TRUE]", forcedSessionId);
+
+    // ✅ أنشئ الـ turn بعد نجاح recorder.start()
+    const turnId = `voice-${Date.now()}`;
+    turnIdRef.current = turnId;
+
+    onMessageAction?.({
+        id: turnId,
+        role: "user",
+        kind: "recording",
+        text: "",
+    });
+
+}, [cleanupAudio, onMessageAction, sendAudioToBackend, onStreamAction]);
 
     // ========================
     // 🛑 INTERRUPT VOICE
@@ -458,9 +504,10 @@ export const useVoice = ({
             cleanupAudio();
             abortControllerRef.current?.abort();
 
-            if (sessionId) {
+            const sid = sessionIdRef.current;
+            if (sid) {
                 try {
-                    await fetch(`${API_BASE}/api/v1/voice/interrupt/${sessionId}`, {
+                    await fetch(`${API_BASE}/api/v1/voice/interrupt/${sid}`, {
                         method: "POST",
                         headers: {
                             ...buildAuthHeaders(),
@@ -476,7 +523,7 @@ export const useVoice = ({
         } catch (err) {
             console.error("[VOICE] interruptVoice error:", err);
         }
-    }, [API_BASE, buildAuthHeaders, cleanupAudio, sessionId, onStreamAction]);
+    }, [API_BASE, buildAuthHeaders, cleanupAudio, onStreamAction]);
 
     // ========================
     // 🧹 CLEANUP
@@ -500,20 +547,29 @@ export const useVoice = ({
     }, [cleanupAudio, onStreamAction]);
 
     useEffect(() => {
-        if (!sessionId) return;
+    if (!sessionId) return;
 
-        setIsRecording(false);
-        setIsProcessing(false);
-        setLiveStatus("");
-        setError(null);
+    // لا تعمل Reset أثناء وجود Recording أو Recorder
+    if (isRecording || mediaRecorderRef.current) return;
 
-        chunksRef.current = [];
-        turnIdRef.current = null;
-        lastMetaRef.current = null;
-        onStreamAction?.(null);
+    setIsRecording(false);
+    setIsProcessing(false);
+    setLiveStatus("");
+    setError(null);
 
-        cleanupAudio();
-    }, [sessionId, cleanupAudio, onStreamAction]);
+    chunksRef.current = [];
+    turnIdRef.current = null;
+    lastMetaRef.current = null;
+    onStreamAction?.(null);
+
+    cleanupAudio();
+
+}, [
+    sessionId,
+    isRecording,
+    cleanupAudio,
+    onStreamAction,
+]);
 
     // ========================
     // PUBLIC API

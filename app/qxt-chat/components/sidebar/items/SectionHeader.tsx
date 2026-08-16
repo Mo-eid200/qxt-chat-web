@@ -84,29 +84,58 @@ export function SectionHeader({
                     [sectionKey]: !isOpen,
                 }));
             }}
-            onDragOver={e => {
-                e.preventDefault();
-                setDropSectionOver(sectionKey);
-            }}
-            onDragLeave={() =>
-                setDropSectionOver(null)
-            }
-            onDrop={e => {
-                e.preventDefault();
-                const sid =
-                    (() => {
-                        try {
-                            return e.dataTransfer.getData("text/plain");
-                        } catch {
-                            return "";
-                        }
-                    })();
-                if (sid && onDropMoveTo) onDropMoveTo(sid);
-                setDraggingId(null);
-                setDropOverId(null);
-                setDropSectionOver(null);
-                setDropProjectOver(null);
-            }}
+            onDragOver={(e) => {
+  e.preventDefault();
+  e.stopPropagation();
+
+  e.dataTransfer.dropEffect = "move";
+
+  setDropSectionOver(sectionKey);
+  setDropProjectOver(null);
+  setDropOverId(null);
+}}
+            onDragLeave={(e) => {
+  const nextTarget =
+    e.relatedTarget as Node | null;
+
+  if (
+    nextTarget &&
+    e.currentTarget.contains(nextTarget)
+  ) {
+    return;
+  }
+
+  setDropSectionOver(null);
+}}
+            onDrop={(e) => {
+  e.preventDefault();
+  e.stopPropagation();
+
+  const sid =
+    (() => {
+      try {
+        return (
+          e.dataTransfer.getData(
+            "application/x-qxt-session"
+          ) ||
+          e.dataTransfer.getData(
+            "text/plain"
+          )
+        );
+      } catch {
+        return "";
+      }
+    })();
+
+  if (sid && onDropMoveTo) {
+    void onDropMoveTo(sid);
+  }
+
+  setDraggingId(null);
+  setDropOverId(null);
+  setDropSectionOver(null);
+  setDropProjectOver(null);
+}}
             title={linkMode ? L.open : L.dropToMove}
             role={clickable ? "button" : undefined}
             tabIndex={clickable ? 0 : -1}

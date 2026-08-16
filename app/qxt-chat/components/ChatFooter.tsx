@@ -7,13 +7,17 @@ import React, {
 import {
   Mic, Plus, Send, Loader2, X,
   AlertCircle, Image as ImageIcon,
-  FileText, Smile, ChevronDown, Zap,
+  FileText, Smile, ChevronDown, Zap, Copy
 } from "lucide-react";
 import EmojiPicker from "emoji-picker-react";
 import { useVoice }        from "../../hooks/useVoice";
 import { createSession }   from "../../lib/api/chat/sessions";
 import { useUpload }       from "../../hooks/useUpload";
 import { getStoredToken }  from "../../lib/api/core/qxtClient";
+import hljs from "highlight.js";
+import { FileCode2 } from "lucide-react";
+import { ModelSelector } from "./ModelSelector";
+
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -28,6 +32,11 @@ type PendingDocument = {
   name: string;
   size?: number;
   mimeType?: string;
+};
+
+type PendingCode = {
+  code: string;
+  language: string;
 };
 
 type Model = { id: string; label: string };
@@ -60,6 +69,7 @@ interface ChatFooterProps {
   setPendingDocuments?: React.Dispatch<React.SetStateAction<PendingDocument[]>>;
   onStop?: () => void;
   sessionId?: string | null;
+  ensureSession?: () => Promise<string>;
   selectedModel?: Model | null;
   onModelChange?: (model: Model) => void;
   models?: Model[];
@@ -120,6 +130,7 @@ export function ChatFooter({
   pendingImages, setPendingImages,
   pendingDocuments = [], setPendingDocuments,
   onStop, sessionId,
+  ensureSession,
   selectedModel, onModelChange, models = [],
   onVoiceMessage, onRecordingStateChange,
   onQuotaExceeded, onSessionChange,
@@ -137,6 +148,8 @@ export function ChatFooter({
   const [recordingTime, setRecordingTime] = useState(0);
   const [mounted, setMounted]           = useState(false);
 
+  const [pendingCode, setPendingCode] = useState<PendingCode | null>(null);
+  const [codePreviewOpen, setCodePreviewOpen] = useState(false);
   const textareaRef         = useRef<HTMLTextAreaElement>(null);
   const containerRef        = useRef<HTMLDivElement>(null);
   const placeholderTimer    = useRef<NodeJS.Timeout | null>(null);
@@ -149,63 +162,84 @@ export function ChatFooter({
   const voiceCanceledRef    = useRef(false);
 
   // ضيف الـ handler دا
+const CODE_PASTE_LINE_THRESHOLD = 60; // lines
+
+const looksLikeCode = (text: string): boolean => {
+  const lines = text.split("\n");
+  if (lines.length < CODE_PASTE_LINE_THRESHOLD) return false;
+  const codeChars = (text.match(/[{}();=<>[\]]/g) || []).length;
+  return codeChars / text.length > 0.02;
+};
+
 const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
   const items = e.clipboardData?.items;
-  if (!items) return;
 
-  for (const item of Array.from(items)) {
-    if (item.type.startsWith("image/")) {
-      e.preventDefault();
+  // Image paste (existing behavior, unchanged)
+  if (items) {
+    for (const item of Array.from(items)) {
+      if (item.type.startsWith("image/")) {
+        e.preventDefault();
+        const file = item.getAsFile();
+        if (!file) continue;
 
-      const file = item.getAsFile();
-      if (!file) continue;
+        const preview = URL.createObjectURL(file);
+        const temp = { url: "", preview, type: "image" as const };
+        setPendingImages((p) => [...p, temp]);
 
-      const preview = URL.createObjectURL(file);
-      const temp = { url: "", preview, type: "image" as const };
-      setPendingImages((p) => [...p, temp]);
-
-      upload(file).then((res) => {
-        if (!res?.url) { setError("Upload failed"); return; }
-
-        setPendingImages((p) =>
-          p.map((img) => {
-            if (img.preview === preview && !img.url) {
-              URL.revokeObjectURL(preview);
-              return { ...img, url: res.url, preview: res.url };
-            }
-            return img;
-          })
-        );
-      });
-
-      break; // صورة واحدة في المرة
+        upload(file).then((res) => {
+          if (!res?.url) { setError("Upload failed"); return; }
+          setPendingImages((p) =>
+            p.map((img) => {
+              if (img.preview === preview && !img.url) {
+                URL.revokeObjectURL(preview);
+                return { ...img, url: res.url, preview: res.url };
+              }
+              return img;
+            })
+          );
+        });
+        return;
+      }
     }
+  }
+
+  const pastedText = e.clipboardData?.getData("text/plain") || "";
+    if (looksLikeCode(pastedText)) {
+    e.preventDefault();
+    const detected = hljs.highlightAuto(pastedText);
+    const language = detected.language || "plaintext";
+    setPendingCode({ code: pastedText, language });
   }
 }, [setPendingImages, upload]);
 
-  const isAr = lang === "ar";
 
   // ── Voice hook ───────────────────────────────────────────────────────────────
 
+const handleVoiceSessionCreated = useCallback((id: string) => {
+    window.history.replaceState({}, "", `?sid=${id}`);
+  }, []);
+
+  const handleVoiceComplete = useCallback(() => {}, []);
+
+  const handleVoiceMessageAction = useCallback((data: VoiceMessage) => {
+    if (voiceCanceledRef.current || !onVoiceMessage) return;
+    const baseId = voiceIdRef.current || data.id || `voice-${Date.now()}`;
+    if (!voiceIdRef.current) voiceIdRef.current = baseId;
+
+    if (data.role === "user") {
+      onVoiceMessage({ id: baseId, role: "user", kind: (data.kind as any) || (data.text ? "text" : "stream_update"), text: data.text, audioUrl: data.audioUrl });
+    } else {
+      onVoiceMessage({ id: `assistant-${baseId}`, role: "assistant", kind: (data.kind as any) || (data.text ? "text" : "stream_update"), text: data.text, audioUrl: data.audioUrl });
+    }
+  }, [onVoiceMessage]);
+
   const voiceState = useVoice({
-    voiceMode: !!(sessionId || selectedModel),
+    voiceMode: !!selectedModel,
     selectedModel: selectedModel ? { id: selectedModel.id } : undefined,
     sessionId: sessionId || undefined,
-    onSessionCreatedAction: (id: string) => {
-      window.history.replaceState({}, "", `?sid=${id}`);
-    },
-    onCompleteAction: () => {},
-    onMessageAction: (data: VoiceMessage) => {
-      if (voiceCanceledRef.current || !onVoiceMessage) return;
-      const baseId = voiceIdRef.current || data.id || `voice-${Date.now()}`;
-      if (!voiceIdRef.current) voiceIdRef.current = baseId;
-
-      if (data.role === "user") {
-        onVoiceMessage({ id: baseId, role: "user", kind: (data.kind as any) || (data.text ? "text" : "stream_update"), text: data.text, audioUrl: data.audioUrl });
-      } else {
-        onVoiceMessage({ id: `assistant-${baseId}`, role: "assistant", kind: (data.kind as any) || (data.text ? "text" : "stream_update"), text: data.text, audioUrl: data.audioUrl });
-      }
-    },
+    onSessionCreatedAction: handleVoiceSessionCreated,
+    onCompleteAction: handleVoiceComplete,
+    onMessageAction: handleVoiceMessageAction,
   });
 
   const {
@@ -224,9 +258,9 @@ const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) =
   [selectedModel, models]);
 
   const canSend = useMemo(() =>
-    (input.trim().length > 0 || pendingImages.length > 0) &&
+    (input.trim().length > 0 || pendingImages.length > 0 || !!pendingCode) &&
     !loading && !isUploading && !!currentModel?.id && !isVoiceActive,
-  [input, pendingImages.length, loading, isUploading, currentModel?.id, isVoiceActive]);
+[input, pendingImages.length, pendingCode, loading, isUploading, currentModel?.id, isVoiceActive]);
 
   const formattedTime = useMemo(() => {
     const m = Math.floor(recordingTime / 60);
@@ -356,34 +390,37 @@ const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) =
   // ── Handlers ─────────────────────────────────────────────────────────────────
 
   const handleVoiceToggle = useCallback(async () => {
-    let sid = sessionId;
-
     if (!isRecording) {
-      voiceCanceledRef.current = false;
-      const tempId = `voice-${Date.now()}`;
-      voiceIdRef.current = tempId;
+        voiceCanceledRef.current = false;
 
-      onVoiceMessage?.({ id: tempId, role: "user", text: "", kind: "recording" });
+        // 🔥 FIX: tell the parent "voice is starting" BEFORE calling
+        // ensureSession() — ensureSession() triggers a router.replace()
+        // that changes the URL's sid param, which useChatHydration
+        // watches and reacts to by reloading messages from the server
+        // (wiping the just-added recording bubble). isVoiceActive
+        // normally only becomes true once useVoice's own
+        // isRecording/isProcessing flip — which happens AFTER
+        // ensureSession() resolves — so the hydration guard wasn't
+        // armed yet at the exact moment the URL changed. Signaling
+        // early closes that gap.
+        onRecordingStateChange?.(true);
 
-      if (!sid) {
+        let sid: string;
         try {
-          const res = await createSession();
-          sid = res.id;
-          onSessionChange?.(sid, res);
-          window.history.replaceState({}, "", `?sid=${sid}`);
+            sid = await ensureSession!();
         } catch {
-          setError("Failed to create session");
-          voiceIdRef.current = null;
-          return;
+            setError("Failed to create session");
+            onRecordingStateChange?.(false);
+            return;
         }
-      }
 
-      await startRecording();
-      return;
+        voiceIdRef.current = null;
+        await startRecording(sid);
+        return;
     }
 
     await startRecording();
-  }, [sessionId, isRecording, startRecording, onSessionChange, onVoiceMessage]);
+}, [isRecording, startRecording, ensureSession, onRecordingStateChange]);
 
   const handleInterruptVoice = useCallback(async () => {
     const vid = voiceIdRef.current;
@@ -399,13 +436,22 @@ const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) =
     try { await interruptVoice(); } catch {}
   }, [interruptVoice, onVoiceMessage, onStop]);
 
-  const handleSend = useCallback(async () => {
+const handleSend = useCallback(async () => {
     if (!canSend) return;
 
     try {
       setError(null);
+
+      // 🔥 If there's a pending code attachment, fold it into the
+      // message text as a fenced code block — the same format model
+      // replies already use, so the existing CodeBlock/artifact
+      // detection in ChatMessages picks it up automatically.
+      const codeBlock = pendingCode
+        ? `\n\n\`\`\`${pendingCode.language}\n${pendingCode.code}\n\`\`\``
+        : "";
+
       await onSend({
-        text:   input.trim(),
+        text:   input.trim() + codeBlock,
         model:  currentModel!.id,
         isVoiceActive: false,
         images: pendingImages.filter((i) => i.url).map((i) => i.url),
@@ -414,10 +460,11 @@ const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) =
       onChange("");
       setPendingImages([]);
       setPendingDocuments?.([]);
+      setPendingCode(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to send");
     }
-  }, [canSend, input, currentModel, pendingImages, pendingDocuments, onSend, onChange, setPendingImages, setPendingDocuments]);
+}, [canSend, input, currentModel, pendingImages, pendingDocuments, pendingCode, onSend, onChange, setPendingImages, setPendingDocuments]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
@@ -489,6 +536,10 @@ const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) =
     setPendingDocuments?.((p) => (p || []).filter((_, i) => i !== idx));
   }, [setPendingDocuments]);
 
+  const handleRemoveCode = useCallback(() => {
+  setPendingCode(null);
+}, []);
+
   const handleEmoji = useCallback((obj: any) => {
     const ta  = textareaRef.current;
     if (!ta) return;
@@ -510,7 +561,7 @@ const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) =
   // ─────────────────────────────────────────────────────────────────────────────
 
   return (
-    <div ref={containerRef} dir={isAr ? "rtl" : "ltr"} className="relative">
+    <div ref={containerRef} className="relative">
 
       {/* ── Error toast ── */}
       {error && (
@@ -546,7 +597,7 @@ const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) =
             : "bg-blue-50 border-blue-200 text-blue-700"
         }`}>
           <Loader2 className="w-4 h-4 animate-spin shrink-0" />
-          <span>{liveStatus || (isAr ? "جاري معالجة الصوت..." : "Processing voice...")}</span>
+          <span>{liveStatus || "Processing voice..."}</span>
         </div>
       )}
 
@@ -590,11 +641,46 @@ const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) =
         </div>
       )}
 
+      {/* ── Pending code attachment ── */}
+      {pendingCode && (
+        <div className="mb-2">
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={() => setCodePreviewOpen(true)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") setCodePreviewOpen(true);
+            }}
+            className="group flex items-center gap-2.5 px-3 py-2.5 rounded-xl border border-blue-500/25 bg-gradient-to-br from-zinc-900/60 to-black/40 hover:border-blue-400/50 transition-colors w-full max-w-xs text-left cursor-pointer"
+          >
+            <div className="h-8 w-8 shrink-0 rounded-lg bg-blue-500/15 border border-blue-500/30 flex items-center justify-center">
+              <FileCode2 className="w-4 h-4 text-blue-400" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-xs font-semibold text-zinc-100 truncate">
+                {pendingCode.language || "code"} snippet
+              </div>
+              <div className="text-[11px] text-zinc-400">
+                {pendingCode.code.split("\n").length} lines
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); handleRemoveCode(); }}
+              className="shrink-0 h-6 w-6 rounded-full flex items-center justify-center text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+              aria-label="Remove code"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ── Main input box ── */}
       <div className={`rounded-2xl border transition-all duration-200 ${
   darkMode
-    ? "bg-white/[0.04] border-white/[0.06] focus-within:border-emerald-500/40 focus-within:bg-white/[0.05] focus-within:shadow-[0_0_0_1px_rgba(16,185,129,0.15)]"
-    : "bg-black/[0.03] border-black/[0.06] focus-within:border-emerald-500/50 focus-within:shadow-[0_0_0_1px_rgba(16,185,129,0.12)]"
+    ? "bg-white/[0.04] border-white/[0.06] focus-within:border-blue-500/40 focus-within:bg-white/[0.05] focus-within:shadow-[0_0_0_1px_rgba(59,130,246,0.15)]"
+    : "bg-black/[0.03] border-black/[0.06] focus-within:border-blue-500/50 focus-within:shadow-[0_0_0_1px_rgba(59,130,246,0.12)]"
 }`}>
 
         {/* Textarea */}
@@ -608,12 +694,12 @@ const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) =
             onPaste={handlePaste}
             placeholder={sessionId ? "Message..." : (typedPlaceholder || placeholder || "Message...")}
             disabled={loading || isVoiceActive}
-            className={`w-full resize-none bg-transparent text-sm leading-relaxed
-  outline-none ring-0 border-0 appearance-none
-  focus:outline-none focus:ring-0 focus:border-0 focus:shadow-none
-  placeholder:transition-opacity
-  disabled:opacity-50
-  ${darkMode ? "text-white placeholder:text-white/25" : "text-black placeholder:text-black/30"}
+            className={`w-full resize-none bg-transparent text-sm leading-relaxed qxt-scroll
+outline-none ring-0 border-0 appearance-none
+focus:outline-none focus:ring-0 focus:border-0 focus:shadow-none
+placeholder:transition-opacity
+disabled:opacity-50
+${darkMode ? "text-white placeholder:text-white/25" : "text-black placeholder:text-black/30"}
 `}
           />
         </div>
@@ -623,7 +709,7 @@ const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) =
           <div className="px-4 pb-2">
             <div className={`h-0.5 rounded-full overflow-hidden ${darkMode ? "bg-white/10" : "bg-black/10"}`}>
               <div
-                className="h-full bg-emerald-500 transition-all duration-300 rounded-full"
+                className="h-full bg-blue-500 transition-all duration-300 rounded-full"
                 style={{ width: `${uploadProgress}%` }}
               />
             </div>
@@ -637,56 +723,7 @@ const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) =
         <div className="flex items-center gap-1 px-3 pb-3">
 
           {/* ── Model selector ── */}
-          <div className="relative">
-            <button
-              onClick={() => setModelMenuOpen((v) => !v)}
-              className={`
-                flex items-center gap-1.5 h-7 px-2.5 rounded-lg text-[12px] font-medium
-                transition-all duration-150
-                ${darkMode
-                  ? "text-white/45 hover:text-white/70 hover:bg-white/[0.06]"
-                  : "text-black/45 hover:text-black/70 hover:bg-black/[0.06]"
-                }
-              `}
-            >
-              <Zap className="w-3 h-3" />
-              <span className="hidden sm:block max-w-[90px] truncate">
-                {mounted ? (currentModel?.label || "Model") : "Model"}
-              </span>
-              <ChevronDown className={`w-3 h-3 transition-transform duration-200 ${modelMenuOpen ? "rotate-180" : ""}`} />
-            </button>
-
-            {modelMenuOpen && models.length > 0 && (
-              <div className={`
-                absolute bottom-full mb-2 left-0 w-52
-                rounded-xl border overflow-hidden
-                animate-in slide-in-from-bottom-2 fade-in duration-150
-                z-50 ${menuClass}
-              `}>
-                {models.map((m) => (
-                  <button
-                    key={m.id}
-                    onClick={() => { onModelChange?.(m); setModelMenuOpen(false); }}
-                    className={`
-                      w-full flex items-center gap-2.5 px-3.5 py-2.5 text-sm text-left
-                      transition-colors duration-100
-                      ${currentModel?.id === m.id
-                        ? darkMode ? "bg-white/[0.08] text-white"       : "bg-black/[0.06] text-black"
-                        : darkMode ? "text-white/55 hover:bg-white/[0.05] hover:text-white/80"
-                                   : "text-black/55 hover:bg-black/[0.04] hover:text-black/80"
-                      }
-                    `}
-                  >
-                    <Zap className="w-3.5 h-3.5 shrink-0" />
-                    <span className="flex-1 font-medium">{m.label}</span>
-                    {currentModel?.id === m.id && (
-                      <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                    )}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+            <ModelSelector darkMode={darkMode} />
 
           {/* Divider */}
           <div className={`w-px h-4 mx-1 ${darkMode ? "bg-white/[0.08]" : "bg-black/[0.08]"}`} />
@@ -814,14 +851,22 @@ const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) =
                 <X className="w-4 h-4" />
               </IconBtn>
 
-              {/* Submit voice */}
-              <button
+              {/* 🔥 FIX: Mic button stays visible during recording too —
+                  clicking it now stops the recording and sends it, the
+                  same action the user's muscle memory expects ("tap
+                  mic again to stop"). Previously the mic button
+                  vanished entirely while recording and was replaced
+                  only by a separate Send icon elsewhere, which is why
+                  taps kept landing nowhere and stacking up duplicate
+                  "Recording..." bubbles instead of ever stopping the
+                  in-progress one. */}
+              <IconBtn
                 onClick={handleVoiceToggle}
-                title="Send"
-                className="h-8 w-8 rounded-lg flex items-center justify-center bg-white text-black hover:bg-white/90 transition-all"
+                title="Stop & Send"
+                className="text-red-400 bg-red-500/10 animate-pulse"
               >
-                <Send className="w-3.5 h-3.5" />
-              </button>
+                <Mic className="w-4 h-4" />
+              </IconBtn>
             </div>
           )}
         </div>
@@ -830,9 +875,48 @@ const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) =
       {/* ── Hint ── */}
       {!loading && !isVoiceActive && (
         <p className={`mt-2 text-[11px] px-1 ${darkMode ? "text-white/20" : "text-black/25"}`}>
-          {isAr ? "Shift + Enter للسطر الجديد" : "Shift + Enter for new line"}
+          {"Shift + Enter for new line"}
         </p>
       )}
+
+      {/* ── Code preview modal ── */}
+      {codePreviewOpen && pendingCode && (
+        <div
+          className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[100] p-6"
+          onClick={() => setCodePreviewOpen(false)}
+        >
+          <div
+            className="bg-[#0a0a0b] border border-white/10 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] flex flex-col overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 bg-black/40">
+              <div className="flex items-center gap-2 text-sm font-medium text-zinc-200">
+                <FileCode2 className="w-4 h-4 text-blue-400" />
+                <span className="uppercase text-blue-400/80 text-xs tracking-wide">{pendingCode.language}</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => navigator.clipboard.writeText(pendingCode.code)}
+                  className="h-7 px-2.5 rounded-md bg-blue-500/15 hover:bg-blue-500/30 text-blue-300 text-xs font-medium flex items-center gap-1.5 border border-blue-500/40"
+                >
+                  <Copy className="w-3 h-3" />
+                  Copy
+                </button>
+                <button
+                  onClick={() => setCodePreviewOpen(false)}
+                  className="h-7 w-7 rounded-md flex items-center justify-center text-zinc-400 hover:text-red-400 hover:bg-red-500/10"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+            <pre className="p-4 text-[13px] text-zinc-100 font-mono overflow-auto flex-1 whitespace-pre qxt-scroll">
+              {pendingCode.code}
+            </pre>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

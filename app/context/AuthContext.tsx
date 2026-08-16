@@ -2,12 +2,14 @@
 
 import React, {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
+
 import axios from "axios";
 
 import {
@@ -18,14 +20,21 @@ import {
 } from "../lib/api/auth/auth.helpers";
 
 import {
-  fetchMe,
-  fetchMyApiKey,
   apiLogin,
   apiRegister,
+  fetchBootstrap,
+  fetchMe,
+  fetchMyApiKey,
   invalidateAuthCache,
 } from "../lib/api/auth/auth.api";
 
-import type { AuthUser, AuthContextValue } from "../lib/api/auth/auth.types";
+import type {
+  AuthContextValue,
+  AuthUser,
+  BootstrapResponse,
+  LoginResponse,
+  RegisterResponse,
+} from "../lib/api/auth/auth.types";
 
 // ─── Context ──────────────────────────────────────────────────────────────────
 
@@ -33,20 +42,66 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
+export function AuthProvider({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [apiKey, setApiKey] = useState<string | null>(null);
+
+  const [bootstrap, setBootstrap] =
+    useState<BootstrapResponse | null>(null);
+
   const [loadingUser, setLoadingUser] = useState(true);
+  const [authReady, setAuthReady] = useState(false);
 
   const mountedRef = useRef(true);
   const bootRef = useRef(false);
 
+  // ── Mount lifecycle ────────────────────────────────────────────────────────
+
   useEffect(() => {
     mountedRef.current = true;
-    return () => { mountedRef.current = false; };
+
+    return () => {
+      mountedRef.current = false;
+    };
   }, []);
 
-  // ── Boot: restore session from stored token ──────────────────────────────
+  // ── Bootstrap ──────────────────────────────────────────────────────────────
+
+  const refreshBootstrap =
+    useCallback(async (): Promise<BootstrapResponse> => {
+      const data = await fetchBootstrap();
+
+      if (mountedRef.current) {
+        setBootstrap(data);
+        setUser(data.user);
+      }
+
+      return data;
+    }, []);
+
+  // ── API key ────────────────────────────────────────────────────────────────
+  // API key is intentionally outside the critical authentication path.
+
+  const loadApiKeyInBackground = useCallback(async (): Promise<void> => {
+    try {
+      const key = await fetchMyApiKey();
+
+      if (mountedRef.current) {
+        setApiKey(key);
+      }
+    } catch {
+      if (mountedRef.current) {
+        setApiKey(null);
+      }
+    }
+  }, []);
+
+  // ── Restore existing session ───────────────────────────────────────────────
+
   useEffect(() => {
     if (bootRef.current) return;
     bootRef.current = true;
@@ -55,11 +110,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     if (!token) {
       logoutSideEffects();
+
       if (mountedRef.current) {
         setUser(null);
         setApiKey(null);
+        setBootstrap(null);
         setLoadingUser(false);
+        setAuthReady(true);
       }
+
       return;
     }
 
@@ -67,127 +126,232 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     let cancelled = false;
 
-    (async () => {
+    void (async () => {
       try {
-        // fetchMe uses cache — safe to call freely
-        const me = await fetchMe();
+        const data = await fetchBootstrap();
+
         if (cancelled || !mountedRef.current) return;
-        setUser(me);
+
+        setBootstrap(data);
+        setUser(data.user);
+
+        // Critical authentication/bootstrap work is complete here.
         setLoadingUser(false);
+        setAuthReady(true);
 
-        const k = await fetchMyApiKey();
-        if (cancelled || !mountedRef.current) return;
-        setApiKey(k);
-      } catch (error: any) {
+        // API key does not block rendering.
+        void loadApiKeyInBackground();
+      } catch (error: unknown) {
         if (cancelled || !mountedRef.current) return;
 
-        if (axios.isAxiosError(error) && error.response?.status === 401) {
+        if (
+          axios.isAxiosError(error) &&
+          error.response?.status === 401
+        ) {
           logoutSideEffects();
           invalidateAuthCache();
-          setUser(null);
-          setApiKey(null);
-        } else {
-          // Network / transient error — don't kill the session
-          setUser(null);
-          setApiKey(null);
         }
 
+        // For either an invalid session or an unavailable backend,
+        // do not expose partially hydrated authenticated state.
+        setUser(null);
+        setApiKey(null);
+        setBootstrap(null);
         setLoadingUser(false);
+        setAuthReady(true);
       }
     })();
 
-    return () => { cancelled = true; };
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+  }, [loadApiKeyInBackground]);
 
-  // ── Shared helpers ────────────────────────────────────────────────────────
+  // ── Token authentication ──────────────────────────────────────────────────
 
-  async function refreshMeAndKeys() {
-    // force=true bypasses cache (explicit refresh)
-    const me = await fetchMe(true);
-    if (!mountedRef.current) return;
-    setUser(me);
-
-    const k = await fetchMyApiKey(true);
-    if (!mountedRef.current) return;
-    setApiKey(k);
-  }
-
-  async function setAuthFromToken(token: string) {
-    if (!token) throw new Error("Missing token");
-
-    await loginSideEffects(token);
-    if (mountedRef.current) setLoadingUser(true);
-
-    try {
-      await refreshMeAndKeys();
-    } catch (error) {
-      if (axios.isAxiosError(error) && error.response?.status === 401) {
-        await logoutSideEffects();
-        invalidateAuthCache();
-        if (mountedRef.current) {
-          setUser(null);
-          setApiKey(null);
-        }
+  const setAuthFromToken =
+    useCallback(async (
+      token: string
+    ): Promise<BootstrapResponse> => {
+      if (!token) {
+        throw new Error("Missing access token");
       }
-      throw error;
-    } finally {
-      if (mountedRef.current) setLoadingUser(false);
+
+      loginSideEffects(token);
+
+      if (mountedRef.current) {
+        setLoadingUser(true);
+        setAuthReady(false);
+      }
+
+      try {
+        const data = await fetchBootstrap();
+
+        if (mountedRef.current) {
+          setBootstrap(data);
+          setUser(data.user);
+          setLoadingUser(false);
+          setAuthReady(true);
+        }
+
+        // Non-critical request.
+        void loadApiKeyInBackground();
+
+        return data;
+      } catch (error: unknown) {
+        if (
+          axios.isAxiosError(error) &&
+          error.response?.status === 401
+        ) {
+          logoutSideEffects();
+          invalidateAuthCache();
+
+          if (mountedRef.current) {
+            setUser(null);
+            setApiKey(null);
+            setBootstrap(null);
+          }
+        }
+
+        if (mountedRef.current) {
+          setLoadingUser(false);
+          setAuthReady(true);
+        }
+
+        throw error;
+      }
+    }, [loadApiKeyInBackground]);
+
+  // ── Login ──────────────────────────────────────────────────────────────────
+
+  const login = useCallback(async (
+    email: string,
+    password: string
+  ): Promise<LoginResponse> => {
+    const response = await apiLogin(email, password);
+
+    // MFA challenge is a valid login response.
+    // No authenticated session exists until MFA verification succeeds.
+    if (response.mfa_required) {
+      return response;
     }
-  }
 
-  async function login(email: string, password: string) {
-    const data = await apiLogin(email, password);
-    const token = pickTokenFromResponse(data);
-    if (!token) throw new Error("No access token returned from backend");
-    await setAuthFromToken(token);
-  }
-
-  async function register(email: string, password: string) {
-    const data = await apiRegister(email, password);
-    const token = pickTokenFromResponse(data);
+    const token = pickTokenFromResponse(response);
 
     if (!token) {
-      // Some backends don't return token on register — fall back to login
-      await login(email, password);
-      return;
+      throw new Error(
+        "Authentication succeeded without an access token"
+      );
     }
 
     await setAuthFromToken(token);
-  }
 
-  function logout() {
+    return response;
+  }, [setAuthFromToken]);
+
+  // ── Register ───────────────────────────────────────────────────────────────
+
+  const register = useCallback(async (
+    email: string,
+    password: string
+  ): Promise<RegisterResponse> => {
+    const response = await apiRegister(email, password);
+
+    const token = pickTokenFromResponse(response);
+
+    if (!token) {
+      throw new Error(
+        "Registration succeeded without an access token"
+      );
+    }
+
+    await setAuthFromToken(token);
+
+    return response;
+  }, [setAuthFromToken]);
+
+  // ── Legacy explicit refresh ────────────────────────────────────────────────
+  // Kept for existing callers while the rest of the app migrates to bootstrap.
+
+  const refreshMeAndKeys = useCallback(async (): Promise<void> => {
+    const me = await fetchMe(true);
+
+    if (!mountedRef.current) return;
+
+    setUser(me);
+
+    const key = await fetchMyApiKey(true);
+
+    if (!mountedRef.current) return;
+
+    setApiKey(key);
+  }, []);
+
+  // ── Logout ─────────────────────────────────────────────────────────────────
+
+  const logout = useCallback((): void => {
     logoutSideEffects();
     invalidateAuthCache();
+
     if (mountedRef.current) {
       setUser(null);
       setApiKey(null);
+      setBootstrap(null);
       setLoadingUser(false);
+      setAuthReady(true);
     }
-  }
+  }, []);
 
-  // ── Value ─────────────────────────────────────────────────────────────────
+  // ── Context value ──────────────────────────────────────────────────────────
 
   const value = useMemo<AuthContextValue>(
     () => ({
       user,
       apiKey,
+      bootstrap,
       loadingUser,
+      authReady,
+
+      login,
+      register,
+      logout,
+
+      setAuthFromToken,
+      refreshBootstrap,
+      refreshMeAndKeys,
+    }),
+    [
+      user,
+      apiKey,
+      bootstrap,
+      loadingUser,
+      authReady,
       login,
       register,
       logout,
       setAuthFromToken,
+      refreshBootstrap,
       refreshMeAndKeys,
-    }),
-    [user, apiKey, loadingUser]
+    ]
   );
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider value={value}>
+      {children}
+    </AuthContext.Provider>
+  );
 }
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 
-export function useAuth() {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error("useAuth must be used within AuthProvider");
-  return ctx;
+export function useAuth(): AuthContextValue {
+  const context = useContext(AuthContext);
+
+  if (!context) {
+    throw new Error(
+      "useAuth must be used within AuthProvider"
+    );
+  }
+
+  return context;
 }

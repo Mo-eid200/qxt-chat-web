@@ -21,6 +21,16 @@ import { AIStatus } from "./AIStatus";
 import { MessageActions } from "./MessageActions";
 
 import type { ChatMessage, Reaction } from "../../types/chat";
+import { FileCode2 } from "lucide-react";
+
+const LANGUAGE_EXTENSIONS: Record<string, string> = {
+  javascript: "js", typescript: "ts", tsx: "tsx", jsx: "jsx",
+  python: "py", java: "java", c: "c", cpp: "cpp", "c++": "cpp",
+  csharp: "cs", "c#": "cs", go: "go", rust: "rs", ruby: "rb",
+  php: "php", swift: "swift", kotlin: "kt", html: "html",
+  css: "css", scss: "scss", json: "json", yaml: "yml", sql: "sql",
+  bash: "sh", shell: "sh", plaintext: "txt",
+};
 
 type AIStage = "thinking" | "analyzing" | "searching" | "generating" | "writing";
 
@@ -29,6 +39,7 @@ type Props = {
   lang: "en" | "ar";
   assistantName: string;
   darkMode: boolean;
+  onOpenCodePanel?: (code: string, language: string) => void;
 
   messageDir: "rtl" | "ltr";
   messageTextAlign: "text-right" | "text-left";
@@ -57,7 +68,7 @@ type Props = {
   streaming: boolean;
 
   pendingStage?: AIStage | null;
-  stageHistory?: AIStage[];
+  pendingDetail?: string;
 
   bottomRef: React.RefObject<HTMLDivElement | null>;
 };
@@ -92,50 +103,97 @@ const resolveSafeUrls = (urls: string[] | undefined): string[] => {
 };
 
 /* ======================================================
-   CODE BLOCK
+   CODE BLOCK (small/medium — inline in chat)
 ====================================================== */
 
 type CodeBlockProps = {
   children: React.ReactNode;
   className?: string;
+  onOpenPanel?: (code: string, language: string) => void;
 };
 
-const CodeBlock = memo(function CodeBlock({ children, className }: CodeBlockProps) {
+const CODE_ARTIFACT_THRESHOLD = 1500; // chars
+
+const CodeBlock = memo(function CodeBlock({ children, className, onOpenPanel }: CodeBlockProps) {
   const language = className?.replace("language-", "") || "plaintext";
   const code = String(children).replace(/\n$/, "");
   const [copied, setCopied] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
 
+  const isLargeCode = code.length > CODE_ARTIFACT_THRESHOLD;
+  const lineCount = useMemo(() => code.split("\n").length, [code]);
+
   const highlighted = useMemo(() => {
+    if (isLargeCode) return ""; // no need to highlight preview
     try {
       return hljs.highlight(code, { language }).value;
     } catch {
       return hljs.highlightAuto(code).value;
     }
-  }, [code, language]);
+  }, [code, language, isLargeCode]);
 
   const lines = code.split("\n");
   const shouldCollapse = lines.length > 30;
 
-  const handleCopyLocal = useCallback(() => {
+  const handleCopyLocal = useCallback((e?: React.MouseEvent) => {
+    e?.stopPropagation();
     navigator.clipboard.writeText(code);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   }, [code]);
 
+  const handleDownloadLocal = useCallback((e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    const ext = LANGUAGE_EXTENSIONS[language] || "txt";
+    const blob = new Blob([code], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `code.${ext}`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [code, language]);
+
   const displayLines = collapsed ? lines.slice(0, 20) : lines;
 
+  // 🔥 Large code → Claude-style artifact card, not inline dump
+  if (isLargeCode) {
+    return (
+      <button
+        type="button"
+        onClick={() => onOpenPanel?.(code, language)}
+        className="group my-3 w-full max-w-sm flex items-center gap-3 rounded-xl border border-blue-500/25 bg-gradient-to-br from-zinc-900/80 to-black/60 px-4 py-3.5 text-left transition-all duration-200 hover:border-blue-400/50 hover:shadow-lg hover:shadow-blue-500/10"
+      >
+        <div className="h-10 w-10 shrink-0 rounded-lg bg-blue-500/15 border border-blue-500/30 flex items-center justify-center">
+          <FileCode2 className="w-5 h-5 text-blue-400" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-semibold text-zinc-100 truncate">
+            code.{LANGUAGE_EXTENSIONS[language] || "txt"}
+          </div>
+          <div className="text-xs text-zinc-400 mt-0.5 flex items-center gap-1.5">
+            <span className="uppercase tracking-wide text-blue-400/80 font-medium">{language || "code"}</span>
+            <span className="text-zinc-600">•</span>
+            <span>{lineCount} lines</span>
+          </div>
+        </div>
+        <ChevronRight className="w-4 h-4 text-zinc-500 group-hover:text-blue-400 group-hover:translate-x-0.5 transition-all shrink-0" />
+      </button>
+    );
+  }
+
+  // Small/medium code — inline block, unchanged behavior
   return (
     <div className="relative group my-3 rounded-lg overflow-hidden border border-white/10 bg-black/50">
       <div className="flex items-center justify-between bg-black/60 px-4 py-2.5 border-b border-white/10">
-        <span className="text-xs font-semibold text-emerald-400 uppercase tracking-wider">
+        <span className="text-xs font-semibold text-blue-400 uppercase tracking-wider">
           {language || "code"}
         </span>
         <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
           {shouldCollapse && (
             <button
               onClick={() => setCollapsed(!collapsed)}
-              className="h-7 px-2.5 rounded-md bg-emerald-500/15 hover:bg-emerald-500/30 text-emerald-300 transition-colors text-xs font-medium border border-emerald-500/40"
+              className="h-7 px-2.5 rounded-md bg-blue-500/15 hover:bg-blue-500/30 text-blue-300 transition-colors text-xs font-medium border border-blue-500/40"
               aria-label={collapsed ? "Expand code" : "Collapse code"}
             >
               {collapsed ? "Expand" : "Collapse"}
@@ -143,7 +201,7 @@ const CodeBlock = memo(function CodeBlock({ children, className }: CodeBlockProp
           )}
           <button
             onClick={handleCopyLocal}
-            className="h-7 px-2.5 rounded-md bg-emerald-500/15 hover:bg-emerald-500/30 text-emerald-300 transition-colors text-xs font-medium flex items-center gap-1.5 border border-emerald-500/40"
+            className="h-7 px-2.5 rounded-md bg-blue-500/15 hover:bg-blue-500/30 text-blue-300 transition-colors text-xs font-medium flex items-center gap-1.5 border border-blue-500/40"
             aria-label="Copy code"
           >
             {copied ? (
@@ -163,9 +221,9 @@ const CodeBlock = memo(function CodeBlock({ children, className }: CodeBlockProp
 
       <div className="overflow-x-auto bg-black/80">
         <pre
-          className="p-4 text-sm overflow-x-auto leading-relaxed text-emerald-100 font-mono flex text-[13px]"
+          className="p-4 text-sm overflow-x-auto leading-relaxed text-zinc-100 font-mono flex text-[13px]"
           dangerouslySetInnerHTML={{
-            __html: `<span class="inline-block min-w-12 mr-4 text-emerald-400/40 select-none text-right pr-2">${displayLines
+            __html: `<span class="inline-block min-w-12 mr-4 text-blue-400/40 select-none text-right pr-2">${displayLines
               .map((_, i) => i + 1)
               .join("\n")}</span><span class="flex-1">${highlighted}</span>`,
           }}
@@ -173,7 +231,7 @@ const CodeBlock = memo(function CodeBlock({ children, className }: CodeBlockProp
       </div>
 
       {collapsed && shouldCollapse && (
-        <div className="px-4 py-2 bg-black/60 border-t border-white/10 text-xs text-emerald-300/70 font-medium">
+        <div className="px-4 py-2 bg-black/60 border-t border-white/10 text-xs text-blue-300/70 font-medium">
           ... {lines.length - 20} more lines
         </div>
       )}
@@ -314,7 +372,7 @@ const ImageModal = memo(function ImageModal({
           href={currentImage}
           download
           onClick={(e) => e.stopPropagation()}
-          className="flex items-center gap-1.5 text-xs text-gray-300 hover:text-emerald-400 transition-colors duration-200 hover:scale-110"
+          className="flex items-center gap-1.5 text-xs text-gray-300 hover:text-blue-400 transition-colors duration-200 hover:scale-110"
           title="Download"
           aria-label="Download image"
         >
@@ -399,11 +457,11 @@ const ImageModal = memo(function ImageModal({
               e.stopPropagation();
               handlePrev();
             }}
-            className="absolute left-6 top-1/2 -translate-y-1/2 h-11 w-11 rounded-full bg-white/10 flex items-center justify-center transition-all duration-200 hover:scale-110 hover:bg-emerald-500/40 group"
+            className="absolute left-6 top-1/2 -translate-y-1/2 h-11 w-11 rounded-full bg-white/10 flex items-center justify-center transition-all duration-200 hover:scale-110 hover:bg-blue-500/40 group"
             title="Previous (←)"
             aria-label="Previous image"
           >
-            <ChevronLeft className="w-6 h-6 group-hover:text-emerald-400" />
+            <ChevronLeft className="w-6 h-6 group-hover:text-blue-400" />
           </button>
 
           <button
@@ -434,7 +492,13 @@ ImageModal.displayName = "ImageModal";
    MARKDOWN CONTENT
 ====================================================== */
 
-const MarkdownContent = memo(function MarkdownContent({ content }: { content: string }) {
+const MarkdownContent = memo(function MarkdownContent({
+  content,
+  onOpenCodePanel,
+}: {
+  content: string;
+  onOpenCodePanel?: (code: string, language: string) => void;
+}) {
   const parts = useMemo(() => {
     if (!content || typeof content !== "string") return [];
     return content.split(/(```[\s\S]*?```)/);
@@ -456,7 +520,7 @@ const MarkdownContent = memo(function MarkdownContent({ content }: { content: st
             : codeContent;
 
           return (
-            <CodeBlock key={i} className={`language-${language}`}>
+            <CodeBlock key={i} className={`language-${language}`} onOpenPanel={onOpenCodePanel}>
               {code}
             </CodeBlock>
           );
@@ -473,7 +537,7 @@ const MarkdownContent = memo(function MarkdownContent({ content }: { content: st
               a: ({ children, href }) => (
                 <a
                   href={href}
-                  className="text-emerald-400 hover:text-emerald-300 underline transition-colors"
+                  className="text-blue-400 hover:text-blue-300 underline transition-colors"
                   target="_blank"
                   rel="noopener noreferrer"
                 >
@@ -481,21 +545,21 @@ const MarkdownContent = memo(function MarkdownContent({ content }: { content: st
                 </a>
               ),
               strong: ({ children }) => (
-                <strong className="font-semibold text-emerald-300">{children}</strong>
+                <strong className="font-semibold text-amber-300">{children}</strong>
               ),
               em: ({ children }) => <em className="italic">{children}</em>,
               code: ({ children }) => (
-                <code className="bg-black/40 px-1.5 py-0.5 rounded-md text-[12px] border border-white/10 font-mono text-emerald-100">
+                <code className="bg-black/40 px-1.5 py-0.5 rounded-md text-[12px] border border-white/10 font-mono text-zinc-100">
                   {children}
                 </code>
               ),
               blockquote: ({ children }) => (
-                <blockquote className="border-l-4 border-emerald-500/50 pl-4 py-1 my-2 italic opacity-80">
+                <blockquote className="border-l-4 border-amber-500/50 pl-4 py-1 my-2 italic opacity-80">
                   {children}
                 </blockquote>
               ),
               h1: ({ children }) => (
-                <h1 className="text-xl font-bold my-3 first:mt-0 text-emerald-300">
+                <h1 className="text-xl font-bold my-3 first:mt-0 text-amber-300">
                   {children}
                 </h1>
               ),
@@ -522,7 +586,7 @@ const MarkdownContent = memo(function MarkdownContent({ content }: { content: st
                 </div>
               ),
               thead: ({ children }) => (
-                <thead className="bg-emerald-500/10 border-b border-emerald-500/30">
+                <thead className="bg-blue-500/10 border-b border-blue-500/30">
                   {children}
                 </thead>
               ),
@@ -627,6 +691,8 @@ const MessageBubble = memo(function MessageBubble({
   handleShare,
   handleReport,
   isStreaming,
+  lang,
+  onOpenCodePanel,
 }: any) {
   const [selectedImageIndex, setSelectedImageIndex] = useState<number | null>(null);
 
@@ -634,7 +700,7 @@ const MessageBubble = memo(function MessageBubble({
   const videos = resolveSafeUrls(msg.payload?.videos ?? msg.videos);
 
   const bubbleClass = isUser
-    ? "bg-gradient-to-br from-emerald-600 to-emerald-700 text-emerald-50 shadow-emerald-500/25 rounded-3xl rounded-br-md"
+    ? "bg-gradient-to-br from-zinc-700 to-zinc-800 text-zinc-50 text-emerald-50 shadow-zinc-700/25 rounded-3xl rounded-br-md"
     : "bg-gradient-to-br from-emerald-950/40 to-black/60 text-emerald-50 shadow-emerald-500/15 border border-emerald-500/20 rounded-3xl rounded-bl-md";
 
   // ✅ Voice-safe sanitize (NO trim for recording/stream_update)
@@ -652,15 +718,30 @@ const MessageBubble = memo(function MessageBubble({
     return "grid-cols-3";
   }, [images.length]);
 
-  const handleSpeakClick = useCallback(() => {
-    if (!sanitizedContent?.trim()) return;
-    handleSpeak?.(sanitizedContent, String(idx));
-  }, [handleSpeak, sanitizedContent, idx]);
+const handlePlayStoredAudio = useCallback(() => {
+    const audioUrl = 
+        (msg as any).audioUrl || 
+        (msg as any).payload?.audio_url ||
+        ((msg as any).payload?.audio?.[0]) ||
+        null;
 
+    if (!audioUrl) return;
+
+    const audio = new Audio(audioUrl);
+    audio.play().catch((err) => {
+        console.warn("[ChatMessages] Failed to play stored audio:", err);
+    });
+}, [msg]);
+
+const hasStoredAudio = !!(
+    (msg as any).audioUrl || 
+    (msg as any).payload?.audio_url ||
+    ((msg as any).payload?.audio?.length > 0)
+);
   return (
     <>
       <div
-        className={`group max-w-[85%] px-5 py-4 text-base leading-relaxed backdrop-blur-xl shadow-lg ${bubbleClass} transition-all duration-200 hover:shadow-xl`}
+        className={`group max-w-full w-fit px-5 py-4 text-base leading-relaxed backdrop-blur-xl shadow-lg ${bubbleClass} transition-all duration-200 hover:shadow-xl`}
       >
         {!isUser && (
           <div className="text-xs font-semibold opacity-70 mb-2.5 tracking-wide flex items-center gap-1.5">
@@ -676,7 +757,7 @@ const MessageBubble = memo(function MessageBubble({
               onChange={(e) => setEditingText(e.target.value)}
               dir={messageDir}
               rows={4}
-              className="w-full resize-none rounded-lg px-4 py-3 text-sm outline-none border bg-black/40 border-emerald-500/30 text-emerald-50 focus:border-emerald-400 focus:bg-black/60"
+              className="w-full resize-none rounded-lg px-4 py-3 text-sm outline-none border bg-black/40 border-blue-500/30 text-zinc-50 focus:border-blue-400 focus:bg-black/60"
               autoFocus
               aria-label="Edit message"
             />
@@ -692,7 +773,7 @@ const MessageBubble = memo(function MessageBubble({
 
               <button
                 onClick={saveEdit}
-                className="px-4 py-2 rounded-lg text-sm font-semibold bg-emerald-600 text-white hover:bg-emerald-700 transition-all duration-200"
+                className="px-4 py-2 rounded-lg text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 transition-all duration-200"
                 aria-label="Save message"
               >
                 Save
@@ -734,9 +815,9 @@ const MessageBubble = memo(function MessageBubble({
 
               {sanitizedContent ? (
                 <div className="block break-words">
-                  <MarkdownContent content={sanitizedContent} />
+                  <MarkdownContent content={sanitizedContent} onOpenCodePanel={onOpenCodePanel} />
                   {isStreaming && (
-                    <span className="animate-pulse inline text-emerald-400 ml-1">▌</span>
+                    <span className="animate-pulse inline text-amber-400 ml-1">▌</span>
                   )}
                 </div>
               ) : images.length === 0 &&
@@ -771,18 +852,18 @@ const MessageBubble = memo(function MessageBubble({
               role={isUser ? "user" : "assistant"}
               content={sanitizedContent}
               messageId={String(idx)}
-              darkMode={darkMode}
-              lang={isAr ? "ar" : "en"}
+              onSpeakAction={hasStoredAudio ? handlePlayStoredAudio : undefined}
+              isSpeaking={false}
               canEdit={isUser}
               onCopyAction={() => handleCopy(sanitizedContent, idx)}
               onEditAction={() => startEdit(idx, sanitizedContent)}
               onReactionAction={(r: any) => handleReaction(idx, r)}
               onShareAction={() => handleShare(sanitizedContent)}
               onReportAction={() => handleReport(sanitizedContent)}
-              onSpeakAction={handleSpeakClick}
               reaction={reactions[idx]}
               isCopied={copiedIndex === idx}
-              isSpeaking={speakingId === String(idx)}
+              darkMode={darkMode}
+              lang={lang}
             />
           </>
         )}
@@ -828,73 +909,18 @@ function ChatMessagesComponent({
   clampText,
   streaming,
   pendingStage,
-  stageHistory = [],
+  pendingDetail,
   bottomRef,
+  onOpenCodePanel,
 }: Props) {
-  const [speakingId, setSpeakingId] = useState<string | null>(null);
-
-  const handleSpeakWrapper = useCallback(
-    (text: string, id: string) => {
-      if (!text?.trim()) return;
-
-      if (speakingId === id) {
-        window.speechSynthesis.cancel();
-        setSpeakingId(null);
-        return;
-      }
-
-      window.speechSynthesis.cancel();
-
-      const utter = new SpeechSynthesisUtterance(text);
-      utter.lang = lang === "ar" ? "ar-EG" : "en-US";
-
-      utter.onend = () => setSpeakingId(null);
-      utter.onerror = () => setSpeakingId(null);
-
-      setSpeakingId(id);
-      window.speechSynthesis.speak(utter);
-    },
-    [speakingId, lang]
-  );
-
-  useEffect(() => {
-    if (!messages.length) return;
-
-    const lastIndex = messages.length - 1;
-    const lastMsg = messages[lastIndex];
-
-    const shouldAutoSpeak =
-      streaming &&
-      lastMsg.role === "assistant" &&
-      (lastMsg.content?.length ?? 0) > 10 &&
-      speakingId !== String(lastIndex);
-
-    if (shouldAutoSpeak) {
-      handleSpeakWrapper(lastMsg.content, String(lastIndex));
-    }
-  }, [messages, streaming, speakingId, handleSpeakWrapper]);
-
-  useEffect(() => {
-    if (streaming) {
-      window.speechSynthesis.cancel();
-      setSpeakingId(null);
-    }
-  }, [streaming]);
-
-  useEffect(() => {
-    return () => {
-      if (typeof window !== "undefined" && "speechSynthesis" in window) {
-        window.speechSynthesis.cancel();
-      }
-    };
-  }, []);
+ 
 
   useEffect(() => {
     if (!streaming) bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, bottomRef, streaming]);
 
   return (
-    <div className="w-full max-w-4xl mx-auto space-y-4 pb-8 pt-6 px-4 overflow-x-hidden">
+    <div className="w-full max-w-[740px] mx-auto space-y-4 pb-8 pt-6 px-4 overflow-x-hidden qxt-scroll">
       {messages.length === 0 ? (
         <div className="flex items-center justify-center py-24 text-center opacity-50">
           <div>
@@ -937,6 +963,7 @@ function ChatMessagesComponent({
           return (
             <div
               key={msg.id || idx}
+              id={`msg-${msg.id || idx}`}
               className={`flex ${rowJustify} min-w-0 animate-in fade-in slide-in-from-bottom-3 duration-300`}
             >
               <MessageBubble
@@ -957,11 +984,10 @@ function ChatMessagesComponent({
                 startEdit={startEdit}
                 handleCopy={handleCopy}
                 handleReaction={handleReaction}
-                handleSpeak={handleSpeakWrapper}
-                speakingId={speakingId}
                 handleShare={handleShare}
                 handleReport={handleReport}
                 isStreaming={streaming && isLast && msg.role === "assistant"}
+                onOpenCodePanel={onOpenCodePanel}
               />
             </div>
           );
@@ -970,7 +996,7 @@ function ChatMessagesComponent({
 
       {pendingStage && (
         <div className="flex justify-start animate-in fade-in slide-in-from-bottom-3 duration-300">
-          <AIStatus stage={pendingStage} history={stageHistory} />
+          <AIStatus stage={pendingStage} detail={pendingDetail} />
         </div>
       )}
 

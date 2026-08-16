@@ -16,11 +16,12 @@ import {
 
 export type SidebarFooterProps = {
   collapsed: boolean;
-  darkMode: boolean;
   avatarLetter: string;
   displayName: string;
   subText: string;
+  isLoggedIn: boolean;
   onAccountClickAction?: () => void;
+  onLogoutAction?: () => void;
 };
 
 export function SidebarFooter({
@@ -28,8 +29,11 @@ export function SidebarFooter({
   avatarLetter,
   displayName,
   subText,
+  isLoggedIn,
   onAccountClickAction,
+  onLogoutAction,
 }: SidebarFooterProps) {
+
   const [menuOpen, setMenuOpen] = useState(false);
   // Two-stage mount/visible split — same pattern used for the
   // "Create project" flyout — so the CSS transition actually animates
@@ -73,6 +77,15 @@ export function SidebarFooter({
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  // Both entries open the same account surface (AuthModal), which
+  // internally decides whether to render the Sign in form or the
+  // Account/Billing/Logout view based on the current auth state —
+  // so SidebarFooter doesn't need to track isLoggedIn itself.
+  function openAccount() {
+    setMenuOpen(false);
+    onAccountClickAction?.();
+  }
 
   return (
     <div className="border-t border-white/[0.06] px-2 py-2">
@@ -119,10 +132,7 @@ export function SidebarFooter({
               <MenuItem
                 icon={<Settings className="h-3.5 w-3.5" />}
                 label="Settings"
-                onClick={() => {
-                  setMenuOpen(false);
-                  onAccountClickAction?.();
-                }}
+                onClick={openAccount}
               />
               <MenuItem icon={<Globe className="h-3.5 w-3.5" />} label="Language" />
               <MenuItem icon={<HelpCircle className="h-3.5 w-3.5" />} label="Get help" />
@@ -136,7 +146,18 @@ export function SidebarFooter({
 
               <div className="my-1 border-t border-white/[0.06]" />
 
-              <MenuItem icon={<LogOut className="h-3.5 w-3.5" />} label="Log out" />
+              <MenuItem
+                icon={<LogOut className="h-3.5 w-3.5" />}
+                label={isLoggedIn ? "Log out" : "Log in"}
+                onClick={() => {
+                  setMenuOpen(false);
+                  if (isLoggedIn) {
+                    onLogoutAction?.();
+                  } else {
+                    onAccountClickAction?.();
+                  }
+                }}
+              />
             </div>,
             document.body
           )

@@ -191,3 +191,91 @@ select:focus-visible {
    — scan, typing, genBounce كانوا مستخدمين في AIStatus القديم
      وبقوا dead code بعد ما عملنا النسخة الجديدة
    ============================================================================ */
+
+   /* ==========================================================
+   Custom highlight.js theme — matches app palette
+   (zinc gray base, blue accent, amber accent)
+   ========================================================== */
+
+.hljs {
+  color: #e4e4e7; /* zinc-200 */
+  background: transparent;
+}
+
+.hljs-comment,
+.hljs-quote {
+  color: #71717a; /* zinc-500 */
+  font-style: italic;
+}
+
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal,
+.hljs-subst {
+  color: #60a5fa; /* blue-400 */
+  font-weight: 600;
+}
+
+.hljs-string,
+.hljs-doctag {
+  color: #fbbf24; /* amber-400 */
+}
+
+.hljs-number,
+.hljs-regexp {
+  color: #fb923c; /* orange-400 */
+}
+
+.hljs-title,
+.hljs-section,
+.hljs-selector-id {
+  color: #93c5fd; /* blue-300 */
+  font-weight: 600;
+}
+
+.hljs-type,
+.hljs-class .hljs-title {
+  color: #7dd3fc; /* sky-300 */
+}
+
+.hljs-function .hljs-title,
+.hljs-attr,
+.hljs-attribute {
+  color: #d4d4d8; /* zinc-300 */
+}
+
+.hljs-variable,
+.hljs-template-variable {
+  color: #e4e4e7; /* zinc-200 */
+}
+
+.hljs-symbol,
+.hljs-bullet,
+.hljs-link {
+  color: #fbbf24; /* amber-400 */
+}
+
+.hljs-built_in,
+.hljs-builtin-name {
+  color: #38bdf8; /* sky-400 */
+}
+
+.hljs-meta {
+  color: #71717a; /* zinc-500 */
+}
+
+.hljs-deletion {
+  background: rgba(239, 68, 68, 0.15);
+}
+
+.hljs-addition {
+  background: rgba(34, 197, 94, 0.15);
+}
+
+.hljs-emphasis {
+  font-style: italic;
+}
+
+.hljs-strong {
+  font-weight: 700;
+}

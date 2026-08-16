@@ -1,26 +1,54 @@
-import { useState, useEffect } from "react";
+import {
+  useEffect,
+  useState,
+} from "react";
 
 export function useSidebarStorage<T>(
-    key: string,
-    initial: T
+  key: string,
+  initial: T
 ) {
-    const [value, setValue] = useState<T>(() => {
-        try {
-            const raw = typeof localStorage !== "undefined" && localStorage.getItem(key);
-            const parsed = raw ? (JSON.parse(raw) as T) : null;
-            return parsed && typeof parsed === "object" ? parsed : initial;
-        } catch {
-            return initial;
-        }
-    });
+  // IMPORTANT:
+  // Server and client's first render must use
+  // exactly the same initial value.
+  const [value, setValue] =
+    useState<T>(initial);
 
-    useEffect(() => {
-        try {
-            if (typeof localStorage !== "undefined") {
-                localStorage.setItem(key, JSON.stringify(value));
-            }
-        } catch { }
-    }, [key, value]);
+  const [hydrated, setHydrated] =
+    useState(false);
 
-    return [value, setValue] as const;
+  // Read persisted value only AFTER hydration.
+  useEffect(() => {
+    try {
+      const raw =
+        window.localStorage.getItem(key);
+
+      if (raw !== null) {
+        setValue(JSON.parse(raw) as T);
+      }
+    } catch {
+      // Ignore invalid/missing storage.
+    } finally {
+      setHydrated(true);
+    }
+  }, [key]);
+
+  // Persist changes only after we've read storage.
+  //
+  // This guard is important:
+  // without it, the initial server-safe value
+  // could overwrite the real stored value.
+  useEffect(() => {
+    if (!hydrated) return;
+
+    try {
+      window.localStorage.setItem(
+        key,
+        JSON.stringify(value)
+      );
+    } catch {
+      // Ignore storage errors.
+    }
+  }, [key, value, hydrated]);
+
+  return [value, setValue] as const;
 }

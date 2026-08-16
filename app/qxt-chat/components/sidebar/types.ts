@@ -20,6 +20,8 @@ export type SessionItem = {
   folder_id?: string | null;
 
   pinned?: boolean;
+  starred?: boolean;
+  marked_unread?: boolean;
   sort_index?: number;
 
   messages_count?: number;
