@@ -273,7 +273,7 @@ async function handleSubmit(e: FormEvent) {
                   <div className="relative h-[58px] w-[58px] shrink-0">
                     <Image
                       src="/corelogo.png"
-                      alt="ChatQXT"
+                      alt="Q Chat"
                       fill
                       sizes="58px"
                       className="object-contain p-2"
@@ -340,7 +340,7 @@ async function handleSubmit(e: FormEvent) {
                       <div className="relative h-[52px] w-[52px] shrink-0">
                         <Image
                           src="/corelogo.png"
-                          alt="ChatQXT"
+                          alt="Q Chat"
                           fill priority sizes="52px"
                           className="object-contain"
                         />

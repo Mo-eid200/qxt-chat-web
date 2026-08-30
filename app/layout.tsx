@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "ChatQXT · QXT-AI v1",
+  title: "Q Chat · QXT-AI v1",
   description:
     "ChatQXT – conversational interface powered by the OpenQCore engine (QXT-AI).",
 };

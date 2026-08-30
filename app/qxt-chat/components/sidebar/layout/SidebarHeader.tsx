@@ -1,17 +1,8 @@
 "use client";
 
-import React, {
-  useEffect,
-  useRef,
-} from "react";
-
+import React, { useEffect, useRef } from "react";
 import Image from "next/image";
-
-import {
-  PanelLeft,
-  Search,
-  X,
-} from "lucide-react";
+import { PanelLeft, Search, X } from "lucide-react";
 
 export type SidebarHeaderProps = {
   open: boolean;
@@ -46,8 +37,7 @@ export function SidebarHeader({
   onCloseSearch,
   onSearchChange,
 }: SidebarHeaderProps) {
-  const searchInputRef =
-    useRef<HTMLInputElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!searchOpen) return;
@@ -69,7 +59,7 @@ export function SidebarHeader({
           <span className="absolute inset-0 flex items-center justify-center opacity-100 transition-opacity duration-150 group-hover:opacity-0">
             <Image
               src="/corelogo.png"
-              alt="ChatQXT"
+              alt="Chat Qxt"
               width={60}
               height={60}
               className="rounded-md object-contain"
@@ -97,9 +87,7 @@ export function SidebarHeader({
           <Search
             className={[
               "h-4 w-4 shrink-0",
-              darkMode
-                ? "text-white/35"
-                : "text-slate-400",
+              darkMode ? "text-white/35" : "text-slate-400",
             ].join(" ")}
           />
 
@@ -107,9 +95,7 @@ export function SidebarHeader({
             ref={searchInputRef}
             type="text"
             value={searchValue}
-            onChange={(e) =>
-              onSearchChange(e.target.value)
-            }
+            onChange={(e) => onSearchChange(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Escape") {
                 onCloseSearch();
@@ -128,9 +114,7 @@ export function SidebarHeader({
           {searchValue ? (
             <button
               type="button"
-              onClick={() =>
-                onSearchChange("")
-              }
+              onClick={() => onSearchChange("")}
               className={[
                 "flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition-colors",
                 darkMode
@@ -165,14 +149,35 @@ export function SidebarHeader({
 
   return (
     <div className="flex h-[58px] items-center justify-between px-4">
-      <div className="flex items-center gap-2.5">
-        <span className="text-[17px] tracking-tight text-white/95">
-          Chat
-          <span className="font-bold text-white">
-            QXT
-          </span>
-        </span>
-      </div>
+      <div className="flex items-center gap-2.5 select-none">
+  <span
+    className="
+      font-serif font-bold 
+      text-[30px] leading-none 
+      bg-gradient-to-br from-white to-white/80 
+      bg-clip-text text-transparent
+      drop-shadow-[0_0_18px_rgba(0,255,128,0.28)]
+      tracking-tight
+      animate-glow
+    "
+  >
+    Q
+  </span>
+
+  <span
+    className="
+      font-serif 
+      text-white/90 
+      text-[20px] 
+      leading-none 
+      tracking-tight
+    "
+  >
+    Chat
+  </span>
+</div>
+
+
 
       <div className="ml-auto flex items-center gap-0.5">
         <button

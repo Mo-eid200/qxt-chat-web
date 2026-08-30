@@ -827,11 +827,11 @@ onToggleUnread={() => {
       <WelcomeBubbles />
       <div className="relative z-10 flex w-full max-w-[740px] -translate-y-[4vh] flex-col items-center">
         <div className="mb-8 text-center">
-          <h1 className="mb-2 text-2xl font-semibold text-white/90">
+          <h1 className="font-serif text-white text-[28px] font-bold tracking-tight">
             {welcomeTitle}
           </h1>
 
-          <p className="mx-auto max-w-xl text-sm text-white/55">
+          <p className="font-serif text-white/80 text-[16px] leading-relaxed tracking-tight">
             {welcomeBody}
           </p>
         </div>

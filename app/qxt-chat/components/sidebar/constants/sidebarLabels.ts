@@ -50,7 +50,7 @@ export function getSidebarLabels(
       ? "Agent runtime session"
       : isWorkspace
         ? "Workspace account"
-        : "Your ChatQXT account",
+        : "Your Q Chat account",
 
     noSessions: isAgent
       ? "No agent conversations yet."
