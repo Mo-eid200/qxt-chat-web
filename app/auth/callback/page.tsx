@@ -1,12 +1,11 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { loginSideEffects, applyWorkspaceEverywhere, qxtChatClient } from "../../lib/api/core/qxtClient";
 import { useAuth } from "../../context/AuthContext";
 
-export default function QxtOAuthCallbackPage() {
-  const sp = useSearchParams();
+export default function QxtOAuthCallbackPage({ searchParams }: { searchParams: Record<string, string> }) {
   const router = useRouter();
   const { refreshMeAndKeys } = useAuth();
   const handledRef = useRef(false);
@@ -19,7 +18,8 @@ export default function QxtOAuthCallbackPage() {
     // TOKEN EXTRACTION
     // =====================================================
 
-    const queryToken = sp.get("token") || sp.get("access_token");
+    const queryToken = searchParams.token || searchParams.access_token;
+
     let hashToken: string | null = null;
     if (typeof window !== "undefined") {
       const hash = window.location.hash;
@@ -28,6 +28,7 @@ export default function QxtOAuthCallbackPage() {
         hashToken = parsed.get("token") || parsed.get("access_token");
       }
     }
+
     const token = queryToken || hashToken;
 
     // =====================================================
@@ -105,7 +106,7 @@ export default function QxtOAuthCallbackPage() {
     };
 
     bootstrap();
-  }, [sp, router, refreshMeAndKeys]);
+  }, [searchParams, router, refreshMeAndKeys]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-[#020712] text-emerald-50 text-sm">
