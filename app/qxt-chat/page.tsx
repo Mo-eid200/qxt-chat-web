@@ -1,5 +1,7 @@
 "use client";
 
+import { Suspense } from "react";
+
 import QXTChatClient from "./QXTChatClient";
 
 import type {
@@ -13,11 +15,12 @@ export default function QXTChatPage({
 }) {
 
     return (
-
-        <QXTChatClient
-            agentRuntime={
-                agentRuntime
-            }
-        />
+        <Suspense fallback={null}>
+            <QXTChatClient
+                agentRuntime={
+                    agentRuntime
+                }
+            />
+        </Suspense>
     );
 }
