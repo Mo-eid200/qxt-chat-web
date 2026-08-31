@@ -18,14 +18,6 @@ export function getChatRoute({
   // الـ agent بيتحكم فيه AgentRuntimeContext مش URL
   const base = "/qxt-chat";
 
-  if (!sid) {
-    // لو المستخدم أصلاً واقف على الدومين الرئيسي (/) اللي بيعرض
-    // محتوى /qxt-chat عن طريق rewrite، سيبه على / ومتغيرش شريط
-    // العنوان لـ /qxt-chat — المحتوى نفسه أصلاً واحد.
-    if (typeof window !== "undefined" && window.location.pathname === "/") {
-      return "/";
-    }
-    return base;
-  }
+  if (!sid) return base;
   return `${base}?sid=${encodeURIComponent(sid)}`;
 }
