@@ -11,6 +11,15 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+
+  async rewrites() {
+    return [
+      {
+        source: "/",
+        destination: "/qxt-chat",
+      },
+    ];
+  },
 };
 
 export default nextConfig;
