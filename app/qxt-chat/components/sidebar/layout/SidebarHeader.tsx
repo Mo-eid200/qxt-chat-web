@@ -151,18 +151,17 @@ export function SidebarHeader({
     <div className="flex h-[58px] items-center justify-between px-4">
       <div className="flex items-center gap-2.5 select-none">
   <span
-    className="
-      font-serif font-bold 
-      text-[30px] leading-none 
-      bg-gradient-to-br from-white to-white/80 
-      bg-clip-text text-transparent
-      drop-shadow-[0_0_18px_rgba(0,255,128,0.28)]
-      tracking-tight
-      animate-glow
-    "
-  >
-    Q
-  </span>
+  className="
+    font-serif font-bold 
+    text-[30px] leading-none 
+    bg-gradient-to-b from-[#fff3d6] via-[#f5c563] to-[#c8891f]
+    bg-clip-text text-transparent
+    tracking-tight
+    animate-glow-q
+  "
+>
+  Q
+</span>
 
   <span
     className="
