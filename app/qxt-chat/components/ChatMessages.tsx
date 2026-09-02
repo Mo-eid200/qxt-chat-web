@@ -723,6 +723,35 @@ const MessageBubble = memo(function MessageBubble({
     return "grid-cols-3";
   }, [images.length]);
 
+// ✅ تنظيف نص الرسالة من رموز الماركداون قبل إرساله للـ TTS فقط
+// (النص المعروض على الشاشة يفضل زي ما هو، التنظيف ده للصوت بس)
+function stripMarkdownForSpeech(raw: string): string {
+  let text = raw;
+
+  // أزل كتل الأكواد بالكامل (```...```)
+  text = text.replace(/```[\s\S]*?```/g, " ");
+  // أزل الكود المضمّن `code`
+  text = text.replace(/`([^`]+)`/g, "$1");
+  // حوّل [نص](رابط) إلى نص بس
+  text = text.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
+  // أزل عناوين # ## ### إلخ في بداية السطر
+  text = text.replace(/^#{1,6}\s+/gm, "");
+  // أزل bold/italic: **نص** *نص* __نص__ _نص_
+  text = text.replace(/(\*\*\*|___)([^*_]+)\1/g, "$2");
+  text = text.replace(/(\*\*|__)([^*_]+)\1/g, "$2");
+  text = text.replace(/(\*|_)([^*_]+)\1/g, "$2");
+  // أزل خطوط الفصل --- *** ___
+  text = text.replace(/^[-*_]{3,}\s*$/gm, " ");
+  // أزل علامة الاقتباس > في بداية السطر
+  text = text.replace(/^>\s?/gm, "");
+  // أزل رموز القوائم - * + في بداية السطر (سيب الرقم لو numbered list)
+  text = text.replace(/^[-*+]\s+/gm, "");
+  // طبّع المسافات الزايدة الناتجة
+  text = text.replace(/\n{2,}/g, ". ").replace(/\s{2,}/g, " ").trim();
+
+  return text;
+}
+
 const stopSpeech = useCallback(() => {
     if (audioRef.current) {
       audioRef.current.pause();
@@ -791,7 +820,7 @@ const hasStoredAudio = !!(
     try {
       const token = getStoredToken();
       const formData = new FormData();
-      formData.append("text", sanitizedContent);
+      formData.append("text", stripMarkdownForSpeech(sanitizedContent));
       // ✅ لا نفرض لغة الواجهة — الباك اند بيكتشف اللغة تلقائيًا من محتوى النص نفسه (detect_language)
 
       const res = await fetch(`${API_BASE}/api/v1/voice/tts`, {
