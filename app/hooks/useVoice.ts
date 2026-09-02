@@ -423,6 +423,7 @@ const startRecording = useCallback(async (forcedSessionId?: string) => {
             try {
                 const audioBlob = new Blob(chunksRef.current, { type: mime });
 
+                console.log("🎤 [VOICE DEBUG] blob size:", audioBlob.size, "bytes | mimeType:", mime, "| chunks:", chunksRef.current.length);
                 if (audioBlob.size < MIN_AUDIO_SIZE) {
                     setError("Recording too short");
                     setLiveStatus("");
