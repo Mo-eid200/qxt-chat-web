@@ -215,7 +215,7 @@ const fetchMeta = useCallback(
             blob,
             `voice.${mimeTypeRef.current.includes("webm") ? "webm" : "mp4"}`
         );
-        formData.append("model", selectedModel?.id || "gpt-4o-mini");
+        formData.append("model", selectedModel?.id || "");
         formData.append("session_id", sid);
 
         const { signal, timeoutId } = abortWithTimeout();
@@ -286,7 +286,7 @@ const fetchMeta = useCallback(
                 blob,
                 `voice.${mimeTypeRef.current.includes("webm") ? "webm" : "mp4"}`
             );
-            formData.append("model", selectedModel?.id || "gpt-4o-mini");
+            formData.append("model", selectedModel?.id || "");
             formData.append("session_id", sid);
 
             // ✅ send meta to skip STT+LLM on backend

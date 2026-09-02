@@ -22,6 +22,8 @@ import { MessageActions } from "./MessageActions";
 
 import type { ChatMessage, Reaction } from "../../types/chat";
 import { FileCode2 } from "lucide-react";
+import { API_BASE } from "../../lib/config";
+import { getStoredToken } from "../../lib/api/core/qxtClient";
 
 const LANGUAGE_EXTENSIONS: Record<string, string> = {
   javascript: "js", typescript: "ts", tsx: "tsx", jsx: "jsx",
@@ -695,6 +697,8 @@ const MessageBubble = memo(function MessageBubble({
   onOpenCodePanel,
 }: any) {
   const [selectedImageIndex, setSelectedImageIndex] = useState<number | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [speechState, setSpeechState] = useState<"idle" | "loading" | "playing">("idle");
 
   const images = resolveSafeUrls(msg.payload?.images ?? msg.images);
   const videos = resolveSafeUrls(msg.payload?.videos ?? msg.videos);
@@ -718,7 +722,21 @@ const MessageBubble = memo(function MessageBubble({
     return "grid-cols-3";
   }, [images.length]);
 
+const stopSpeech = useCallback(() => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+      audioRef.current = null;
+    }
+    setSpeechState("idle");
+  }, []);
+
 const handlePlayStoredAudio = useCallback(() => {
+    if (speechState === "playing" || speechState === "loading") {
+      stopSpeech();
+      return;
+    }
+
     const audioUrl = 
         (msg as any).audioUrl || 
         (msg as any).payload?.audio_url ||
@@ -728,16 +746,63 @@ const handlePlayStoredAudio = useCallback(() => {
     if (!audioUrl) return;
 
     const audio = new Audio(audioUrl);
+    audioRef.current = audio;
+    audio.onended = () => setSpeechState("idle");
+    audio.onerror = () => setSpeechState("idle");
+    setSpeechState("playing");
     audio.play().catch((err) => {
         console.warn("[ChatMessages] Failed to play stored audio:", err);
+        setSpeechState("idle");
     });
-}, [msg]);
+}, [msg, speechState, stopSpeech]);
 
 const hasStoredAudio = !!(
     (msg as any).audioUrl || 
     (msg as any).payload?.audio_url ||
     ((msg as any).payload?.audio?.length > 0)
 );
+
+  // 🔧 الميزة دي كانت معلّقة بس (props فاضية من غير أي تنفيذ) --
+  // بتستخدم /api/v1/voice/tts الجديد (نص جاهز -> صوت)، بدل ما تحتاج
+  // الرسالة تكون جاية من تسجيل صوتي أصلاً زي handlePlayStoredAudio.
+  const handleSpeakText = useCallback(async () => {
+    if (speechState === "playing" || speechState === "loading") {
+      stopSpeech();
+      return;
+    }
+    if (!sanitizedContent) return;
+    setSpeechState("loading");
+    try {
+      const token = getStoredToken();
+      const formData = new FormData();
+      formData.append("text", sanitizedContent);
+      formData.append("language", lang === "ar" ? "ar" : "en");
+
+      const res = await fetch(`${API_BASE}/api/v1/voice/tts`, {
+        method: "POST",
+        body: formData,
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        credentials: "include",
+      });
+
+      if (!res.ok) throw new Error(`TTS failed: ${res.status}`);
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audioRef.current = audio;
+      audio.onended = () => {
+        URL.revokeObjectURL(url);
+        setSpeechState("idle");
+      };
+      setSpeechState("playing");
+      await audio.play();
+    } catch (err) {
+      console.warn("[ChatMessages] handleSpeakText failed:", err);
+      setSpeechState("idle");
+    }
+  }, [sanitizedContent, lang, speechState, stopSpeech]);
+
   return (
     <>
       <div
@@ -852,8 +917,9 @@ const hasStoredAudio = !!(
               role={isUser ? "user" : "assistant"}
               content={sanitizedContent}
               messageId={String(idx)}
-              onSpeakAction={hasStoredAudio ? handlePlayStoredAudio : undefined}
-              isSpeaking={false}
+              onSpeakAction={hasStoredAudio ? handlePlayStoredAudio : handleSpeakText}
+              isSpeaking={speechState === "playing"}
+              isLoading={speechState === "loading"}
               canEdit={isUser}
               onCopyAction={() => handleCopy(sanitizedContent, idx)}
               onEditAction={() => startEdit(idx, sanitizedContent)}

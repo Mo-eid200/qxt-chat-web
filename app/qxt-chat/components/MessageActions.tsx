@@ -7,6 +7,8 @@ import {
   ThumbsUp,
   ThumbsDown,
   Volume2,
+  Loader2,
+  Square,
   Flag,
   Pencil,
   Share2,
@@ -34,6 +36,7 @@ interface MessageActionsProps {
   // UI state passed from parent
   isCopied?: boolean;
   isSpeaking?: boolean;
+  isLoading?: boolean;
 }
 
 export function MessageActions({
@@ -52,6 +55,7 @@ export function MessageActions({
   onShareAction,
   isCopied,
   isSpeaking,
+  isLoading,
 }: MessageActionsProps) {
   const isAr = lang === "ar";
 
@@ -194,14 +198,17 @@ export function MessageActions({
         disabled={!hasContent || !hasHandlers.speak}
         className={`${btnBase} ${theme} ${!hasContent || !hasHandlers.speak ? disabledBtn : ""
           }`}
-        title={isAr ? "نطق" : "Read aloud"}
+        title={isSpeaking ? (isAr ? "إيقاف" : "Stop") : isAr ? "نطق" : "Read aloud"}
         aria-label={isAr ? "اقرأ النص بصوت مرتفع" : "Read message aloud"}
         aria-disabled={!hasContent || !hasHandlers.speak}
       >
-        <Volume2
-          className={`w-3.5 h-3.5 transition-transform duration-300 ${isSpeaking ? "text-emerald-400 animate-pulse scale-110" : ""
-            }`}
-        />
+        {isLoading ? (
+          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+        ) : isSpeaking ? (
+          <Square className="w-3.5 h-3.5 fill-current" />
+        ) : (
+          <Volume2 className="w-3.5 h-3.5" />
+        )}
       </button>
 
       {/* ======================== */}
