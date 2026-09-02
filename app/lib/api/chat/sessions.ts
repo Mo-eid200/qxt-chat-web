@@ -231,6 +231,27 @@ function parseApiError(
    NORMALIZERS
 ========================================================= */
 
+// ✅ الباك اند ممكن يبعت content كـ string عادي أو كـ array بصيغة
+// [{"type":"text","text":"..."}] (multimodal content parts) — نفس
+// التطبيع المستخدم في useChatStream.ts/completions.ts، هنا لتحميل
+// الرسايل القديمة وقت فتح/ريفريش السيشن (كان بيتحول لـ "" فيسبب
+// اختفاء الرسالة من الواجهة).
+function extractRawContent(raw: unknown): string {
+  if (typeof raw === "string") return raw;
+  if (Array.isArray(raw)) {
+    return raw
+      .map((part: any) =>
+        typeof part === "string"
+          ? part
+          : typeof part?.text === "string"
+            ? part.text
+            : ""
+      )
+      .join("");
+  }
+  return "";
+}
+
 function normalizeMessage(
   raw: any
 ): ChatMessage {
@@ -299,11 +320,7 @@ function normalizeMessage(
       : undefined,
     role:
       raw?.role || "user",
-    content:
-      typeof raw?.content ===
-      "string"
-        ? raw.content
-        : "",
+    content: extractRawContent(raw?.content),
     payload:
       raw?.payload || null,
     images:
