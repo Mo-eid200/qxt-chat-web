@@ -698,6 +698,7 @@ const MessageBubble = memo(function MessageBubble({
 }: any) {
   const [selectedImageIndex, setSelectedImageIndex] = useState<number | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const cachedAudioUrlRef = useRef<string | null>(null);
   const [speechState, setSpeechState] = useState<"idle" | "loading" | "playing">("idle");
 
   const images = resolveSafeUrls(msg.payload?.images ?? msg.images);
@@ -771,12 +772,27 @@ const hasStoredAudio = !!(
       return;
     }
     if (!sanitizedContent) return;
+
+    // ✅ لو الصوت اتولد قبل كده لنفس الرسالة، شغّله فورًا من غير نداء API جديد
+    if (cachedAudioUrlRef.current) {
+      const cachedAudio = new Audio(cachedAudioUrlRef.current);
+      audioRef.current = cachedAudio;
+      cachedAudio.onended = () => setSpeechState("idle");
+      cachedAudio.onerror = () => setSpeechState("idle");
+      setSpeechState("playing");
+      cachedAudio.play().catch((err) => {
+        console.warn("[ChatMessages] cached audio playback failed:", err);
+        setSpeechState("idle");
+      });
+      return;
+    }
+
     setSpeechState("loading");
     try {
       const token = getStoredToken();
       const formData = new FormData();
       formData.append("text", sanitizedContent);
-      formData.append("language", lang === "ar" ? "ar" : "en");
+      // ✅ لا نفرض لغة الواجهة — الباك اند بيكتشف اللغة تلقائيًا من محتوى النص نفسه (detect_language)
 
       const res = await fetch(`${API_BASE}/api/v1/voice/tts`, {
         method: "POST",
@@ -789,19 +805,27 @@ const hasStoredAudio = !!(
 
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
+      cachedAudioUrlRef.current = url;
       const audio = new Audio(url);
       audioRef.current = audio;
-      audio.onended = () => {
-        URL.revokeObjectURL(url);
-        setSpeechState("idle");
-      };
+      audio.onended = () => setSpeechState("idle");
+      audio.onerror = () => setSpeechState("idle");
       setSpeechState("playing");
       await audio.play();
     } catch (err) {
       console.warn("[ChatMessages] handleSpeakText failed:", err);
       setSpeechState("idle");
     }
-  }, [sanitizedContent, lang, speechState, stopSpeech]);
+  }, [sanitizedContent, speechState, stopSpeech]);
+
+  useEffect(() => {
+    return () => {
+      if (cachedAudioUrlRef.current) {
+        URL.revokeObjectURL(cachedAudioUrlRef.current);
+        cachedAudioUrlRef.current = null;
+      }
+    };
+  }, []);
 
   return (
     <>
