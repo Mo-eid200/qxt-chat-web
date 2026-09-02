@@ -275,7 +275,27 @@ export function useChatStream({
                 continue;
               }
 
-              const delta = json?.choices?.[0]?.delta?.content;
+              // ✅ الباك اند ممكن يبعت delta.content كـ string عادي أو
+              // كـ array بصيغة [{"type":"text","text":"..."}] (multimodal
+              // content parts) — نطبّعها لـ string هنا، في نقطة الدخول
+              // الوحيدة، عشان كل حاجة بعد كده في الابلكيشن (messages state,
+              // ChatMinimap, ChatMessages...) تتعامل مع content كـ string
+              // بسيط دايمًا، بدل ما نرقّع كل نقطة استهلاك على حدة.
+              const rawDelta = json?.choices?.[0]?.delta?.content;
+              const delta =
+                typeof rawDelta === "string"
+                  ? rawDelta
+                  : Array.isArray(rawDelta)
+                    ? rawDelta
+                        .map((part: any) =>
+                          typeof part === "string"
+                            ? part
+                            : typeof part?.text === "string"
+                              ? part.text
+                              : ""
+                        )
+                        .join("")
+                    : "";
               if (!delta) continue;
 
               fullText += delta;

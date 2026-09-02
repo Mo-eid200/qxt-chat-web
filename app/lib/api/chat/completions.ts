@@ -711,9 +711,25 @@ export async function* streamChatCompletion(
         const parsed =
           JSON.parse(raw);
 
-        const content =
+        // ✅ نفس التطبيع اللي في useChatStream.ts: delta.content ممكن
+        // يوصل كـ string أو كـ array [{"type":"text","text":"..."}]
+        const rawContent =
           parsed?.choices?.[0]
             ?.delta?.content;
+        const content =
+          typeof rawContent === "string"
+            ? rawContent
+            : Array.isArray(rawContent)
+              ? rawContent
+                  .map((part: any) =>
+                    typeof part === "string"
+                      ? part
+                      : typeof part?.text === "string"
+                        ? part.text
+                        : ""
+                  )
+                  .join("")
+              : "";
 
         if (content) {
           yield content;

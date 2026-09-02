@@ -545,7 +545,23 @@ useChatHydration({
                 ]);
                 continue;
               }
-              const delta = json?.choices?.[0]?.delta?.content;
+              // ✅ نفس التطبيع اللي في useChatStream.ts: delta.content
+              // ممكن يوصل كـ string أو كـ array [{"type":"text","text":"..."}]
+              const rawDelta = json?.choices?.[0]?.delta?.content;
+              const delta =
+                typeof rawDelta === "string"
+                  ? rawDelta
+                  : Array.isArray(rawDelta)
+                    ? rawDelta
+                        .map((part: any) =>
+                          typeof part === "string"
+                            ? part
+                            : typeof part?.text === "string"
+                              ? part.text
+                              : ""
+                        )
+                        .join("")
+                    : "";
               if (!delta) continue;
 
               stopPendingStage();
