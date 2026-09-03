@@ -48,6 +48,7 @@ export const useVoice = ({
     // ========================
     const [isRecording, setIsRecording] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
+    const [isSpeaking, setIsSpeaking] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [liveStatus, setLiveStatus] = useState<string>("");
 
@@ -146,7 +147,10 @@ export const useVoice = ({
             const audio = new Audio(url);
             audioElementRef.current = audio;
 
+            audio.onplay = () => setIsSpeaking(true);
+
             audio.onended = () => {
+    setIsSpeaking(false);
     cleanupAudio();
     setIsProcessing(false);
     setLiveStatus("✅ Done");
@@ -174,6 +178,7 @@ export const useVoice = ({
 };
 
             audio.onerror = () => {
+                setIsSpeaking(false);
                 console.warn("[VOICE] ⚠️ audio error (ignored)");
             };
 
@@ -487,6 +492,7 @@ const startRecording = useCallback(async (forcedSessionId?: string) => {
     const interruptVoice = useCallback(async () => {
         try {
             isCancelledRef.current = true;
+            setIsSpeaking(false);
 
             if (mediaRecorderRef.current?.state === "recording") {
                 try {
@@ -579,6 +585,7 @@ const startRecording = useCallback(async (forcedSessionId?: string) => {
         return {
             isRecording: false,
             isProcessing: false,
+            isSpeaking: false,
             error: null,
             liveStatus: "",
             startRecording: async () => { },
@@ -589,6 +596,7 @@ const startRecording = useCallback(async (forcedSessionId?: string) => {
     return {
         isRecording,
         isProcessing,
+        isSpeaking,
         error,
         liveStatus,
         startRecording,

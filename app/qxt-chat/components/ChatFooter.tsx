@@ -17,6 +17,7 @@ import { getStoredToken }  from "../../lib/api/core/qxtClient";
 import hljs from "highlight.js";
 import { FileCode2 } from "lucide-react";
 import { ModelSelector } from "./ModelSelector";
+import { VoiceOrbOverlay } from "./VoiceOrbOverlay";
 
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -233,6 +234,7 @@ const handleVoiceSessionCreated = useCallback((id: string) => {
     }
   }, [onVoiceMessage]);
 
+  const [voiceStream, setVoiceStream] = useState<MediaStream | null>(null);
   const voiceState = useVoice({
     voiceMode: !!selectedModel,
     selectedModel: selectedModel ? { id: selectedModel.id } : undefined,
@@ -240,10 +242,11 @@ const handleVoiceSessionCreated = useCallback((id: string) => {
     onSessionCreatedAction: handleVoiceSessionCreated,
     onCompleteAction: handleVoiceComplete,
     onMessageAction: handleVoiceMessageAction,
+    onStreamAction: setVoiceStream,
   });
 
   const {
-    isRecording = false, isProcessing = false,
+    isRecording = false, isProcessing = false, isSpeaking = false,
     liveStatus = "", error: voiceError = null,
     startRecording = async () => {},
     interruptVoice = async () => {},
@@ -917,6 +920,13 @@ ${darkMode ? "text-white placeholder:text-white/25" : "text-black placeholder:te
         </div>
       )}
 
+      <VoiceOrbOverlay
+        isRecording={isRecording}
+        isProcessing={isProcessing}
+        isSpeaking={isSpeaking}
+        stream={voiceStream}
+        onCancel={handleInterruptVoice}
+      />
     </div>
   );
 }
