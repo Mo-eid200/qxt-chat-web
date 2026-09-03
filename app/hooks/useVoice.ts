@@ -72,8 +72,8 @@ export const useVoice = ({
     const sessionIdRef = useRef<string | undefined>(sessionId);
 
     useEffect(() => {
-    sessionIdRef.current = sessionId;
-     }, [sessionId]);
+        sessionIdRef.current = sessionId;
+    }, [sessionId]);
 
     // stable id per voice turn (recording -> stt text -> assistant text)
     const turnIdRef = useRef<string | null>(null);
@@ -86,6 +86,15 @@ export const useVoice = ({
     // audio playback
     const audioElementRef = useRef<HTMLAudioElement | null>(null);
     const objectUrlRef = useRef<string | null>(null);
+
+    // ✅ NEW: sentence-audio playback queue. The backend now streams
+    // one audio_chunk_ready event per completed sentence instead of
+    // one MP3 for the whole reply — this queue plays each chunk the
+    // moment it's ready, in order, without waiting for the rest of
+    // the reply to finish generating/synthesizing.
+    const audioQueueRef = useRef<string[]>([]);
+    const isPlayingQueueRef = useRef(false);
+    const streamEndedRef = useRef(false);
 
     // last meta (to correlate)
     const lastMetaRef = useRef<MetaResponse | null>(null);
@@ -138,224 +147,88 @@ export const useVoice = ({
     }, []);
 
     // ========================
-    // 🎵 PLAY AUDIO RESPONSE (AUDIO ONLY)
+    // 🎵 SENTENCE AUDIO QUEUE
     // ========================
-    const playAudioResponse = useCallback(
-        async (response: Response) => {
-            setLiveStatus("🎵 Playing audio...");
+    // ✅ Plays queued sentence-audio URLs back to back. Called once
+    // per audio_chunk_ready event to enqueue, and drains itself
+    // automatically — the first sentence starts playing as soon as
+    // it arrives, later sentences queue up behind it.
+    const playNextInQueue = useCallback(() => {
+        const next = audioQueueRef.current.shift();
 
-            const audioBlob = await response.blob();
-
-            cleanupAudio();
-
-            const url = URL.createObjectURL(audioBlob);
-            objectUrlRef.current = url;
-
-            const audio = new Audio(url);
-            audioElementRef.current = audio;
-
-            audio.onplay = () => setIsSpeaking(true);
-
-            audio.onended = () => {
-    setIsSpeaking(false);
-    cleanupAudio();
-    setIsProcessing(false);
-    setLiveStatus("✅ Done");
-    onCompleteAction?.();
-
-    const meta = lastMetaRef.current;
-    if (meta?.session_id && meta?.assistant_request_id) {
-        fetch(
-            `${API_BASE}/api/v1/voice/message-audio/${meta.session_id}/${meta.assistant_request_id}`,
-            { headers: buildAuthHeaders(), credentials: "include" }
-        )
-            .then((res) => (res.ok ? res.json() : null))
-            .then((data) => {
-                if (data?.audio_url) {
-                    onMessageAction?.({
-                        id: `assistant-${meta.assistant_request_id}`,
-                        role: "assistant",
-                        kind: "audio_update",
-                        audioUrl: data.audio_url,
-                    });
-                }
-            })
-            .catch(() => {});
-    }
-};
-
-            audio.onerror = () => {
+        if (!next) {
+            isPlayingQueueRef.current = false;
+            // Only finalize once the backend stream has also finished
+            // (no more sentences are coming) — otherwise we'd flicker
+            // isSpeaking off between sentences while more are en route.
+            if (streamEndedRef.current) {
                 setIsSpeaking(false);
-                console.warn("[VOICE] ⚠️ audio error (ignored)");
-            };
+                setIsProcessing(false);
+                setLiveStatus("✅ Done");
+                onCompleteAction?.();
+            }
+            return;
+        }
 
-            try {
-                await audio.play();
-            } catch (err: any) {
-                if (err?.name === "NotAllowedError") {
-                    setLiveStatus("🔊 Click anywhere to play audio");
-                    const clickHandler = async () => {
-                        try {
-                            await audio.play();
-                        } catch { }
-                        document.removeEventListener("click", clickHandler);
-                    };
-                    document.addEventListener("click", clickHandler, { once: true });
-                } else {
-                    console.warn("[VOICE] ⚠️ audio.play() failed:", err);
-                }
+        isPlayingQueueRef.current = true;
+        cleanupAudio();
+
+        const audio = new Audio(next);
+        audioElementRef.current = audio;
+
+        audio.onplay = () => setIsSpeaking(true);
+        audio.onended = () => playNextInQueue();
+        audio.onerror = () => {
+            console.warn("[VOICE] ⚠️ sentence audio error (skipped)");
+            playNextInQueue();
+        };
+
+        audio.play().catch((err) => {
+            if (err?.name === "NotAllowedError") {
+                setLiveStatus("🔊 Click anywhere to play audio");
+                const clickHandler = async () => {
+                    try {
+                        await audio.play();
+                    } catch { }
+                    document.removeEventListener("click", clickHandler);
+                };
+                document.addEventListener("click", clickHandler, { once: true });
+            } else {
+                console.warn("[VOICE] ⚠️ audio.play() failed:", err);
+                playNextInQueue();
+            }
+        });
+    }, [cleanupAudio, onCompleteAction]);
+
+    const enqueueAudioChunk = useCallback(
+        (audioUrl: string) => {
+            audioQueueRef.current.push(audioUrl);
+            if (!isPlayingQueueRef.current) {
+                playNextInQueue();
             }
         },
-        [cleanupAudio, onCompleteAction]
+        [playNextInQueue]
     );
 
-   // ========================
-// 📩 1) META REQUEST (STT + LLM) -> JSON
-// ========================
-// ✅ NEW: reads the backend's SSE stream (user_text -> text_delta* ->
-// done) instead of waiting for one JSON blob. The assistant bubble
-// now fills in token-by-token exactly like typed chat, instead of
-// the orb sitting on "Thinking..." for the whole generation.
-const fetchMeta = useCallback(
-    async (blob: Blob, turnId: string): Promise<MetaResponse> => {
-        const sid = sessionIdRef.current;
-
-        if (!sid) throw new Error("No session ID");
-        if (!blob?.size) throw new Error("Empty blob");
-
-        setLiveStatus("🧠 Transcribing...");
-
-        const formData = new FormData();
-        formData.append(
-            "file",
-            blob,
-            `voice.${mimeTypeRef.current.includes("webm") ? "webm" : "mp4"}`
-        );
-        formData.append("model", selectedModel?.id || "");
-        formData.append("session_id", sid);
-
-        const { signal, timeoutId } = abortWithTimeout();
-
-        const res = await fetch(`${API_BASE}/api/v1/voice/chat/meta`, {
-            method: "POST",
-            body: formData,
-            signal,
-            headers: {
-                ...buildAuthHeaders(),
-            },
-            credentials: "include",
-        }).finally(() => clearTimeout(timeoutId));
-
-        if (!res.ok) {
-            const t = await res.text().catch(() => "");
-            throw new Error(t || `${res.status}`);
-        }
-
-        if (!res.body) throw new Error("No response body");
-
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder("utf-8");
-        let buffer = "";
-        let responseText = "";
-        let doneMeta: MetaResponse | null = null;
-
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            buffer += decoder.decode(value, { stream: true });
-            let boundary: number;
-            while ((boundary = buffer.indexOf("\n\n")) !== -1) {
-                const chunk = buffer.slice(0, boundary).trim();
-                buffer = buffer.slice(boundary + 2);
-                if (!chunk.startsWith("data:")) continue;
-                const data = chunk.replace("data:", "").trim();
-                if (!data) continue;
-
-                let evt: any;
-                try {
-                    evt = JSON.parse(data);
-                } catch {
-                    continue;
-                }
-
-                // ✅ Same status events the typed-chat SSE stream
-                // carries (choices[0].delta.status -> {stage, detail}).
-                // The voice pipeline's event_stream() forwards them
-                // as top-level `status` fields on its own events —
-                // check for that before falling through to the
-                // voice-specific event types below.
-                if (evt.status?.stage) {
-                    setVoiceStage(evt.status.stage);
-                    setVoiceDetail(evt.status.detail);
-                }
-
-                if (evt.type === "user_text") {
-                    onMessageAction?.({
-                        id: turnId,
-                        role: "user",
-                        kind: "text",
-                        text: evt.text,
-                    });
-                    setLiveStatus("💬 Replying...");
-                } else if (evt.type === "text_delta") {
-                    responseText += evt.delta;
-                    onMessageAction?.({
-                        id: `assistant-${turnId}`,
-                        role: "assistant",
-                        kind: "stream_update",
-                        text: responseText,
-                    });
-                } else if (evt.type === "error") {
-                    throw new Error(evt.message || "Voice reply failed");
-                } else if (evt.type === "done") {
-                    doneMeta = {
-                        trace_id: evt.trace_id,
-                        session_id: evt.session_id,
-                        user_request_id: evt.user_request_id,
-                        assistant_request_id: evt.assistant_request_id,
-                        user_text: evt.user_text,
-                        response_text: evt.response_text,
-                        language: evt.language,
-                    };
-                }
-            }
-        }
-
-        if (!doneMeta?.user_text || !doneMeta?.response_text) {
-            throw new Error("Invalid meta response (missing user_text/response_text)");
-        }
-
-        onMessageAction?.({
-            id: `assistant-${turnId}`,
-            role: "assistant",
-            kind: "text",
-            text: doneMeta.response_text,
-        });
-
-        lastMetaRef.current = doneMeta;
-
-        return doneMeta;
-    },
-    [
-        API_BASE,
-        abortWithTimeout,
-        buildAuthHeaders,
-        onMessageAction,
-        selectedModel?.id,
-    ]
-);
-
     // ========================
-    // 🎧 2) AUDIO REQUEST (TTS STREAM) -> MP3
+    // 📩 META REQUEST (STT + LLM + per-sentence audio) -> SSE
     // ========================
-    const fetchAudio = useCallback(
-        async (blob: Blob, meta: MetaResponse) => {
+    // ✅ Reads the backend's SSE stream: user_text -> status* ->
+    // text_delta* -> audio_chunk_ready* -> done. The assistant bubble
+    // fills in token-by-token exactly like typed chat, and sentence
+    // audio starts playing the moment the FIRST sentence is ready —
+    // no more waiting for the whole reply (text or audio) to finish.
+    const fetchMeta = useCallback(
+        async (blob: Blob, turnId: string): Promise<MetaResponse> => {
             const sid = sessionIdRef.current;
+
             if (!sid) throw new Error("No session ID");
-            
             if (!blob?.size) throw new Error("Empty blob");
 
-            setLiveStatus("🔊 Generating voice...");
+            setLiveStatus("🧠 Transcribing...");
+            audioQueueRef.current = [];
+            isPlayingQueueRef.current = false;
+            streamEndedRef.current = false;
 
             const formData = new FormData();
             formData.append(
@@ -366,15 +239,9 @@ const fetchMeta = useCallback(
             formData.append("model", selectedModel?.id || "");
             formData.append("session_id", sid);
 
-            // ✅ send meta to skip STT+LLM on backend
-            formData.append("user_text", meta.user_text);
-            formData.append("response_text", meta.response_text);
-            formData.append("user_request_id", meta.user_request_id);
-            formData.append("assistant_request_id", meta.assistant_request_id);
-
             const { signal, timeoutId } = abortWithTimeout();
 
-            const res = await fetch(`${API_BASE}/api/v1/voice/chat`, {
+            const res = await fetch(`${API_BASE}/api/v1/voice/chat/meta`, {
                 method: "POST",
                 body: formData,
                 signal,
@@ -389,14 +256,122 @@ const fetchMeta = useCallback(
                 throw new Error(t || `${res.status}`);
             }
 
-            await playAudioResponse(res);
+            if (!res.body) throw new Error("No response body");
+
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder("utf-8");
+            let buffer = "";
+            let responseText = "";
+            let doneMeta: MetaResponse | null = null;
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                let boundary: number;
+                while ((boundary = buffer.indexOf("\n\n")) !== -1) {
+                    const chunk = buffer.slice(0, boundary).trim();
+                    buffer = buffer.slice(boundary + 2);
+                    if (!chunk.startsWith("data:")) continue;
+                    const data = chunk.replace("data:", "").trim();
+                    if (!data) continue;
+
+                    let evt: any;
+                    try {
+                        evt = JSON.parse(data);
+                    } catch {
+                        continue;
+                    }
+
+                    // ✅ Same status events the typed-chat SSE stream
+                    // carries (choices[0].delta.status -> {stage, detail}).
+                    if (evt.status?.stage) {
+                        setVoiceStage(evt.status.stage);
+                        setVoiceDetail(evt.status.detail);
+                    }
+
+                    if (evt.type === "user_text") {
+                        onMessageAction?.({
+                            id: turnId,
+                            role: "user",
+                            kind: "text",
+                            text: evt.text,
+                        });
+                        setLiveStatus("💬 Replying...");
+                    } else if (evt.type === "text_delta") {
+                        responseText += evt.delta;
+                        onMessageAction?.({
+                            id: `assistant-${turnId}`,
+                            role: "assistant",
+                            kind: "stream_update",
+                            text: responseText,
+                        });
+                    } else if (evt.type === "audio_chunk_ready") {
+                        // ✅ Start playback of this sentence immediately
+                        // — don't wait for the rest of the reply.
+                        if (evt.audio_url) {
+                            enqueueAudioChunk(evt.audio_url);
+                        }
+                    } else if (evt.type === "error") {
+                        throw new Error(evt.message || "Voice reply failed");
+                    } else if (evt.type === "done") {
+                        doneMeta = {
+                            trace_id: evt.trace_id,
+                            session_id: evt.session_id,
+                            user_request_id: evt.user_request_id,
+                            assistant_request_id: evt.assistant_request_id,
+                            user_text: evt.user_text,
+                            response_text: evt.response_text,
+                            language: evt.language,
+                        };
+                    }
+                }
+            }
+
+            if (!doneMeta?.user_text || !doneMeta?.response_text) {
+                throw new Error("Invalid meta response (missing user_text/response_text)");
+            }
+
+            onMessageAction?.({
+                id: `assistant-${turnId}`,
+                role: "assistant",
+                kind: "text",
+                text: doneMeta.response_text,
+            });
+
+            lastMetaRef.current = doneMeta;
+
+            // ✅ Mark the stream as finished — if the queue is already
+            // empty (all sentences played before the reply text even
+            // finished streaming, for short replies), finalize right
+            // away instead of waiting on a queue that'll never drain
+            // further.
+            streamEndedRef.current = true;
+            if (!isPlayingQueueRef.current && audioQueueRef.current.length === 0) {
+                setIsSpeaking(false);
+                setIsProcessing(false);
+                setLiveStatus("✅ Done");
+                onCompleteAction?.();
+            }
+
+            return doneMeta;
         },
-        [API_BASE, abortWithTimeout, buildAuthHeaders, playAudioResponse, selectedModel?.id]
+        [
+            abortWithTimeout,
+            buildAuthHeaders,
+            enqueueAudioChunk,
+            onCompleteAction,
+            onMessageAction,
+            selectedModel?.id,
+        ]
     );
 
     // ========================
-    // 📤 SEND AUDIO PIPELINE (META -> AUDIO)
+    // 📤 SEND AUDIO PIPELINE
     // ========================
+    // ✅ Audio now arrives as part of fetchMeta's own SSE stream
+    // (audio_chunk_ready events, played via the queue above) — no
+    // second request to /voice/chat needed for a fresh turn.
     const sendAudioToBackend = useCallback(
         async (blob: Blob) => {
             const sid = sessionIdRef.current;
@@ -413,153 +388,147 @@ const fetchMeta = useCallback(
                 const turnId = turnIdRef.current || `voice-${Date.now()}`;
                 turnIdRef.current = turnId;
 
-                // ✅ assistant waiting bubble already exists from onstop()
-                const meta = await fetchMeta(blob, turnId);
-                await fetchAudio(blob, meta);
+                await fetchMeta(blob, turnId);
             } finally {
                 isSendingRef.current = false;
             }
         },
-        [fetchAudio, fetchMeta]
+        [fetchMeta]
     );
 
     // ========================
-// 🎤 START/STOP RECORDING (TOGGLE)
-// ========================
-const startRecording = useCallback(async (forcedSessionId?: string) => {
+    // 🎤 START/STOP RECORDING (TOGGLE)
+    // ========================
+    const startRecording = useCallback(async (forcedSessionId?: string) => {
 
-    if (forcedSessionId) {
-        sessionIdRef.current = forcedSessionId;
-    }
-    // STOP
-    if (mediaRecorderRef.current?.state === "recording") {
-        const duration = Date.now() - startTimeRef.current;
-        if (duration < 1000) return;
-
-        setLiveStatus("⏹️ Sending...");
-        try {
-            mediaRecorderRef.current.stop();
-        } catch {}
-
-        try {
-            streamRef.current?.getTracks().forEach((t) => t.stop());
-        } catch {}
-
-        mediaRecorderRef.current = null;
-        streamRef.current = null;
-        onStreamAction?.(null);
-        setIsRecording(false);
-        return;
-    }
-
-    // START
-    cleanupAudio();
-    chunksRef.current = [];
-
-    setError(null);
-    setIsProcessing(false);
-    setLiveStatus("🎤 Recording...");
-    hasSentRef.current = false;
-    isCancelledRef.current = false;
-
-    const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-            channelCount: 1,
-            sampleRate: 16000,
-        },
-    });
-
-    streamRef.current = stream;
-    onStreamAction?.(stream);
-
-    const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-        ? "audio/webm;codecs=opus"
-        : MediaRecorder.isTypeSupported("audio/webm")
-            ? "audio/webm"
-            : "audio/mp4";
-
-    mimeTypeRef.current = mime;
-
-    const recorder = new MediaRecorder(stream, { mimeType: mime });
-    mediaRecorderRef.current = recorder;
-
-    recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-            chunksRef.current.push(event.data);
+        if (forcedSessionId) {
+            sessionIdRef.current = forcedSessionId;
         }
-    };
+        // STOP
+        if (mediaRecorderRef.current?.state === "recording") {
+            const duration = Date.now() - startTimeRef.current;
+            if (duration < 1000) return;
 
-    recorder.onstop = () => {
-        if (hasSentRef.current) return;
-        hasSentRef.current = true;
-
-        setTimeout(() => {
+            setLiveStatus("⏹️ Sending...");
             try {
-                const audioBlob = new Blob(chunksRef.current, { type: mime });
+                mediaRecorderRef.current.stop();
+            } catch { }
 
-                console.log("🎤 [VOICE DEBUG] blob size:", audioBlob.size, "bytes | mimeType:", mime, "| chunks:", chunksRef.current.length);
-                if (audioBlob.size < MIN_AUDIO_SIZE) {
-                    setError("Recording too short");
+            try {
+                streamRef.current?.getTracks().forEach((t) => t.stop());
+            } catch { }
+
+            mediaRecorderRef.current = null;
+            streamRef.current = null;
+            onStreamAction?.(null);
+            setIsRecording(false);
+            return;
+        }
+
+        // START
+        cleanupAudio();
+        chunksRef.current = [];
+
+        setError(null);
+        setIsProcessing(false);
+        setLiveStatus("🎤 Recording...");
+        hasSentRef.current = false;
+        isCancelledRef.current = false;
+
+        const stream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true,
+                channelCount: 1,
+                sampleRate: 16000,
+            },
+        });
+
+        streamRef.current = stream;
+        onStreamAction?.(stream);
+
+        const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+            ? "audio/webm;codecs=opus"
+            : MediaRecorder.isTypeSupported("audio/webm")
+                ? "audio/webm"
+                : "audio/mp4";
+
+        mimeTypeRef.current = mime;
+
+        const recorder = new MediaRecorder(stream, { mimeType: mime });
+        mediaRecorderRef.current = recorder;
+
+        recorder.ondataavailable = (event) => {
+            if (event.data.size > 0) {
+                chunksRef.current.push(event.data);
+            }
+        };
+
+        recorder.onstop = () => {
+            if (hasSentRef.current) return;
+            hasSentRef.current = true;
+
+            setTimeout(() => {
+                try {
+                    const audioBlob = new Blob(chunksRef.current, { type: mime });
+
+                    if (audioBlob.size < MIN_AUDIO_SIZE) {
+                        setError("Recording too short");
+                        setLiveStatus("");
+                        setIsProcessing(false);
+                        return;
+                    }
+
+                    const tid = turnIdRef.current!;
+                    onMessageAction?.({
+                        id: `assistant-${tid}`,
+                        role: "assistant",
+                        kind: "stream_update",
+                        text: "...",
+                    });
+
+                    if (!isCancelledRef.current) {
+                        void sendAudioToBackend(audioBlob);
+                    } else {
+                        isCancelledRef.current = false;
+                    }
+                } catch (err) {
+                    const msg =
+                        err instanceof Error ? err.message : "Unknown";
+
+                    setError(msg);
                     setLiveStatus("");
                     setIsProcessing(false);
-                    return;
                 }
+            }, 0);
+        };
 
-                const tid = turnIdRef.current!;
-                onMessageAction?.({
-                    id: `assistant-${tid}`,
-                    role: "assistant",
-                    kind: "stream_update",
-                    text: "...",
-                });
+        recorder.onerror = (event: any) => {
+            setError(`Recording error: ${event?.error || "Unknown"}`);
+            setLiveStatus("");
+        };
 
-                if (!isCancelledRef.current) {
-                    void sendAudioToBackend(audioBlob);
-                } else {
-                    isCancelledRef.current = false;
-                }
-            } catch (err) {
-                const msg =
-                    err instanceof Error ? err.message : "Unknown";
+        startTimeRef.current = Date.now();
 
-                setError(msg);
-                setLiveStatus("");
-                setIsProcessing(false);
-            }
-        }, 0);
-    };
+        recorder.start();
 
-    recorder.onerror = (event: any) => {
-        setError(`Recording error: ${event?.error || "Unknown"}`);
-        setLiveStatus("");
-    };
+        setIsRecording(true);
 
-    startTimeRef.current = Date.now();
+        const turnId = `voice-${Date.now()}`;
+        turnIdRef.current = turnId;
 
-    recorder.start();
+        onMessageAction?.({
+            id: turnId,
+            role: "user",
+            kind: "recording",
+            text: "",
+        });
 
-    // ✅ التسجيل بدأ فعلاً
-    setIsRecording(true);
-    console.log("🔴 [SET IS RECORDING TRUE]", forcedSessionId);
-
-    // ✅ أنشئ الـ turn بعد نجاح recorder.start()
-    const turnId = `voice-${Date.now()}`;
-    turnIdRef.current = turnId;
-
-    onMessageAction?.({
-        id: turnId,
-        role: "user",
-        kind: "recording",
-        text: "",
-    });
-
-}, [cleanupAudio, onMessageAction, sendAudioToBackend, onStreamAction]);
+    }, [cleanupAudio, onMessageAction, sendAudioToBackend, onStreamAction]);
 
     // ========================
-    // 🛑 INTERRUPT VOICE
+    // ⏸️ PAUSE / RESUME RECORDING
     // ========================
     // ✅ Pause/resume the in-progress recording (does NOT send or
     // cancel it — the recorded audio so far is kept, MediaRecorder
@@ -570,7 +539,7 @@ const startRecording = useCallback(async (forcedSessionId?: string) => {
                 mediaRecorderRef.current.pause();
                 setIsPaused(true);
                 setLiveStatus("⏸️ Paused");
-            } catch {}
+            } catch { }
         }
     }, []);
 
@@ -580,25 +549,33 @@ const startRecording = useCallback(async (forcedSessionId?: string) => {
                 mediaRecorderRef.current.resume();
                 setIsPaused(false);
                 setLiveStatus("🎤 Recording...");
-            } catch {}
+            } catch { }
         }
     }, []);
 
-    // ✅ Stops ONLY the assistant's voice playback — unlike
-    // interruptVoice (which tears down the whole turn/session state),
-    // this just silences the current audio so the user can keep
-    // chatting immediately, matching the "stop while it's speaking"
-    // control from ChatGPT/Claude voice mode.
+    // ✅ Stops ONLY the assistant's voice playback (and clears the
+    // pending sentence queue) — unlike interruptVoice (which tears
+    // down the whole turn/session state), this just silences the
+    // current audio so the user can keep chatting immediately,
+    // matching the "stop while it's speaking" control from
+    // ChatGPT/Claude voice mode.
     const stopSpeaking = useCallback(() => {
+        audioQueueRef.current = [];
+        isPlayingQueueRef.current = false;
         setIsSpeaking(false);
         cleanupAudio();
         setIsProcessing(false);
         setLiveStatus("");
     }, [cleanupAudio]);
 
+    // ========================
+    // 🛑 INTERRUPT VOICE
+    // ========================
     const interruptVoice = useCallback(async () => {
         try {
             isCancelledRef.current = true;
+            audioQueueRef.current = [];
+            isPlayingQueueRef.current = false;
             setIsSpeaking(false);
 
             if (mediaRecorderRef.current?.state === "recording") {
@@ -637,7 +614,7 @@ const startRecording = useCallback(async (forcedSessionId?: string) => {
         } catch (err) {
             console.error("[VOICE] interruptVoice error:", err);
         }
-    }, [API_BASE, buildAuthHeaders, cleanupAudio, onStreamAction]);
+    }, [buildAuthHeaders, cleanupAudio, onStreamAction]);
 
     // ========================
     // 🧹 CLEANUP
@@ -661,29 +638,29 @@ const startRecording = useCallback(async (forcedSessionId?: string) => {
     }, [cleanupAudio, onStreamAction]);
 
     useEffect(() => {
-    if (!sessionId) return;
+        if (!sessionId) return;
 
-    // لا تعمل Reset أثناء وجود Recording أو Recorder
-    if (isRecording || mediaRecorderRef.current) return;
+        // لا تعمل Reset أثناء وجود Recording أو Recorder
+        if (isRecording || mediaRecorderRef.current) return;
 
-    setIsRecording(false);
-    setIsProcessing(false);
-    setLiveStatus("");
-    setError(null);
+        setIsRecording(false);
+        setIsProcessing(false);
+        setLiveStatus("");
+        setError(null);
 
-    chunksRef.current = [];
-    turnIdRef.current = null;
-    lastMetaRef.current = null;
-    onStreamAction?.(null);
+        chunksRef.current = [];
+        turnIdRef.current = null;
+        lastMetaRef.current = null;
+        onStreamAction?.(null);
 
-    cleanupAudio();
+        cleanupAudio();
 
-}, [
-    sessionId,
-    isRecording,
-    cleanupAudio,
-    onStreamAction,
-]);
+    }, [
+        sessionId,
+        isRecording,
+        cleanupAudio,
+        onStreamAction,
+    ]);
 
     // ========================
     // PUBLIC API

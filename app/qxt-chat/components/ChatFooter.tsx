@@ -155,10 +155,6 @@ export function ChatFooter({
   const containerRef        = useRef<HTMLDivElement>(null);
   const placeholderTimer    = useRef<NodeJS.Timeout | null>(null);
   const recordingTimer      = useRef<NodeJS.Timeout | null>(null);
-  const audioCtxRef         = useRef<AudioContext | null>(null);
-  const analyserRef         = useRef<AnalyserNode | null>(null);
-  const animationRef        = useRef<number | null>(null);
-  const canvasRef           = useRef<HTMLCanvasElement | null>(null);
   const voiceIdRef          = useRef<string | null>(null);
   const voiceCanceledRef    = useRef(false);
 
@@ -278,34 +274,6 @@ const handleVoiceSessionCreated = useCallback((id: string) => {
 
   // ── Wave ─────────────────────────────────────────────────────────────────────
 
-  const drawWave = useCallback(() => {
-    const canvas   = canvasRef.current;
-    const analyser = analyserRef.current;
-    if (!canvas || !analyser) return;
-
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    const data = new Uint8Array(analyser.fftSize);
-    analyser.getByteTimeDomainData(data);
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.lineWidth   = 1.5;
-    ctx.strokeStyle = "rgba(239,68,68,0.8)";
-    ctx.beginPath();
-
-    const sw = canvas.width / data.length;
-    let x = 0;
-    data.forEach((v, i) => {
-      const y = (v / 128) * (canvas.height / 2);
-      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-      x += sw;
-    });
-
-    ctx.lineTo(canvas.width, canvas.height / 2);
-    ctx.stroke();
-    if (isRecording) animationRef.current = requestAnimationFrame(drawWave);
-  }, [isRecording]);
-
   // ── Effects ───────────────────────────────────────────────────────────────────
 
   useEffect(() => { setMounted(true); }, []);
@@ -317,29 +285,12 @@ const handleVoiceSessionCreated = useCallback((id: string) => {
     el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
   }, [input]);
 
-  useEffect(() => {
-    if (!isRecording) return;
-    audioCtxRef.current?.close();
-
-    (window as any).__onVoiceStreamReady = (stream: MediaStream) => {
-      try {
-        const ac  = new (window.AudioContext || (window as any).webkitAudioContext)();
-        const src = ac.createMediaStreamSource(stream);
-        const an  = ac.createAnalyser();
-        an.fftSize = 1024;
-        src.connect(an);
-        audioCtxRef.current = ac;
-        analyserRef.current = an;
-        drawWave();
-      } catch {}
-    };
-
-    return () => {
-      (window as any).__onVoiceStreamReady = null;
-      if (animationRef.current) cancelAnimationFrame(animationRef.current);
-      audioCtxRef.current?.close();
-    };
-  }, [isRecording, drawWave]);
+  // ✅ Old canvas-waveform mic visualization removed — it relied on
+  // window.__onVoiceStreamReady, a global no one ever actually called
+  // (the real mic stream flows through useVoice's onStreamAction to
+  // VoiceOrbOverlay instead), so it never drew anything and just
+  // opened an unused AudioContext on every recording. The orb now
+  // owns all recording/processing/speaking visualization.
 
   useEffect(() => {
     if (sessionId || input.trim() || isVoiceActive) {
