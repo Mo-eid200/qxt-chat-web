@@ -569,6 +569,31 @@ useChatHydration({
               fullText += delta;
               setStreamText(fullText);
 
+              // ✅ Live code-fence detection: as soon as an OPEN ```
+              // appears with no matching close ``` yet, open the side
+              // panel immediately and stream everything after the
+              // fence into it in real time — Claude Artifacts /
+              // ChatGPT Canvas style, instead of only showing code
+              // after the whole message finishes. The compact card
+              // in the chat bubble (CodeBlock) still renders normally
+              // once the message is done; this just makes the panel
+              // itself open live instead of only via that card's
+              // click handler.
+              {
+                const fenceMatches = fullText.match(/```/g);
+                const fenceCount = fenceMatches ? fenceMatches.length : 0;
+                if (fenceCount % 2 === 1) {
+                  const lastFenceIdx = fullText.lastIndexOf("```");
+                  const afterFence = fullText.slice(lastFenceIdx + 3);
+                  const firstNewline = afterFence.indexOf("\n");
+                  const codeLanguage = firstNewline === -1
+                    ? afterFence.trim()
+                    : afterFence.slice(0, firstNewline).trim();
+                  const codeSoFar = firstNewline === -1 ? "" : afterFence.slice(firstNewline + 1);
+                  setCodePanel({ code: codeSoFar, language: codeLanguage || "plaintext" });
+                }
+              }
+
               if (!assistantAdded) {
                 assistantAdded = true;
                 setMessages((prev) => {

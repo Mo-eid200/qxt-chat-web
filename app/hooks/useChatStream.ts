@@ -30,6 +30,7 @@ type UseChatStreamParams = {
   activeAgentId: string | null;
   activeWorkspaceId: string | null;
   activeSpaceType: string;
+  onCodeStreamAction?: (code: string | null, language: string) => void;
 };
 
 export function useChatStream({
@@ -50,6 +51,7 @@ export function useChatStream({
   activeAgentId,
   activeWorkspaceId,
   activeSpaceType,
+  onCodeStreamAction,
 }: UseChatStreamParams) {
   const [loading, setLoading] = useState(false);
   const [streaming, setStreaming] = useState(false);
@@ -300,6 +302,23 @@ export function useChatStream({
 
               fullText += delta;
               setStreamText(fullText);
+
+              if (onCodeStreamAction) {
+                const fenceMatches = fullText.match(/```/g);
+                const fenceCount = fenceMatches ? fenceMatches.length : 0;
+                if (fenceCount % 2 === 1) {
+                  const lastFenceIdx = fullText.lastIndexOf("```");
+                  const afterFence = fullText.slice(lastFenceIdx + 3);
+                  const firstNewline = afterFence.indexOf("\n");
+                  const language = firstNewline === -1
+                    ? afterFence.trim()
+                    : afterFence.slice(0, firstNewline).trim();
+                  const codeSoFar = firstNewline === -1 ? "" : afterFence.slice(firstNewline + 1);
+                  onCodeStreamAction(codeSoFar, language || "plaintext");
+                } else if (fenceCount > 0 && fenceCount % 2 === 0) {
+                  onCodeStreamAction(null, "");
+                }
+              }
 
               if (!assistantAdded) {
                 assistantAdded = true;

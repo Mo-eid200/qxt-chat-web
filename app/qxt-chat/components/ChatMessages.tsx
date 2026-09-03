@@ -704,9 +704,17 @@ const MessageBubble = memo(function MessageBubble({
   const images = resolveSafeUrls(msg.payload?.images ?? msg.images);
   const videos = resolveSafeUrls(msg.payload?.videos ?? msg.videos);
 
+  // ✅ Standardized bubble width: assistant replies now use a fixed
+  // width matching the composer/footer (max-w-[740px], same as
+  // CHAT_WIDTH in QXTChatClient.tsx) instead of shrink-to-fit —
+  // long replies grow vertically like every major chat platform
+  // instead of staying narrow-and-tall. User messages stay w-fit
+  // since they're typically short and look better hugging their
+  // own content.
   const bubbleClass = isUser
     ? "bg-gradient-to-br from-zinc-700 to-zinc-800 text-zinc-50 text-emerald-50 shadow-zinc-700/25 rounded-3xl rounded-br-md"
     : "bg-gradient-to-br from-emerald-950/40 to-black/60 text-emerald-50 shadow-emerald-500/15 border border-emerald-500/20 rounded-3xl rounded-bl-md";
+  const bubbleWidthClass = isUser ? "max-w-full w-fit" : "max-w-[740px] w-full";
 
   // ✅ Voice-safe sanitize (NO trim for recording/stream_update)
   const sanitizedContent = useMemo(() => {
@@ -859,7 +867,8 @@ const hasStoredAudio = !!(
   return (
     <>
       <div
-        className={`group max-w-full w-fit px-5 py-4 text-base leading-relaxed backdrop-blur-xl shadow-lg ${bubbleClass} transition-all duration-200 hover:shadow-xl`}
+        dir="auto"
+        className={`group ${bubbleWidthClass} px-5 py-4 text-base leading-relaxed backdrop-blur-xl shadow-lg ${bubbleClass} transition-all duration-200 hover:shadow-xl`}
       >
         {!isUser && (
           <div className="text-xs font-semibold opacity-70 mb-2.5 tracking-wide flex items-center gap-1.5">
