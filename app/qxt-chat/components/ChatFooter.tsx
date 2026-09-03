@@ -247,9 +247,13 @@ const handleVoiceSessionCreated = useCallback((id: string) => {
 
   const {
     isRecording = false, isProcessing = false, isSpeaking = false,
+    isPaused = false,
     liveStatus = "", error: voiceError = null,
     startRecording = async () => {},
     interruptVoice = async () => {},
+    pauseRecording = () => {},
+    resumeRecording = () => {},
+    stopSpeaking = () => {},
   } = voiceState || {};
 
   const isVoiceActive = isRecording || isProcessing;
@@ -924,8 +928,13 @@ ${darkMode ? "text-white placeholder:text-white/25" : "text-black placeholder:te
         isRecording={isRecording}
         isProcessing={isProcessing}
         isSpeaking={isSpeaking}
+        isPaused={isPaused}
         stream={voiceStream}
         onCancel={handleInterruptVoice}
+        onSend={handleVoiceToggle}
+        onPause={pauseRecording}
+        onResume={resumeRecording}
+        onStopSpeaking={stopSpeaking}
       />
     </div>
   );

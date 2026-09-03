@@ -49,6 +49,7 @@ export const useVoice = ({
     const [isRecording, setIsRecording] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
     const [isSpeaking, setIsSpeaking] = useState(false);
+    const [isPaused, setIsPaused] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [liveStatus, setLiveStatus] = useState<string>("");
 
@@ -489,6 +490,41 @@ const startRecording = useCallback(async (forcedSessionId?: string) => {
     // ========================
     // 🛑 INTERRUPT VOICE
     // ========================
+    // ✅ Pause/resume the in-progress recording (does NOT send or
+    // cancel it — the recorded audio so far is kept, MediaRecorder
+    // just stops capturing new chunks until resumed).
+    const pauseRecording = useCallback(() => {
+        if (mediaRecorderRef.current?.state === "recording") {
+            try {
+                mediaRecorderRef.current.pause();
+                setIsPaused(true);
+                setLiveStatus("⏸️ Paused");
+            } catch {}
+        }
+    }, []);
+
+    const resumeRecording = useCallback(() => {
+        if (mediaRecorderRef.current?.state === "paused") {
+            try {
+                mediaRecorderRef.current.resume();
+                setIsPaused(false);
+                setLiveStatus("🎤 Recording...");
+            } catch {}
+        }
+    }, []);
+
+    // ✅ Stops ONLY the assistant's voice playback — unlike
+    // interruptVoice (which tears down the whole turn/session state),
+    // this just silences the current audio so the user can keep
+    // chatting immediately, matching the "stop while it's speaking"
+    // control from ChatGPT/Claude voice mode.
+    const stopSpeaking = useCallback(() => {
+        setIsSpeaking(false);
+        cleanupAudio();
+        setIsProcessing(false);
+        setLiveStatus("");
+    }, [cleanupAudio]);
+
     const interruptVoice = useCallback(async () => {
         try {
             isCancelledRef.current = true;
@@ -586,10 +622,14 @@ const startRecording = useCallback(async (forcedSessionId?: string) => {
             isRecording: false,
             isProcessing: false,
             isSpeaking: false,
+            isPaused: false,
             error: null,
             liveStatus: "",
             startRecording: async () => { },
             interruptVoice: async () => { },
+            pauseRecording: () => { },
+            resumeRecording: () => { },
+            stopSpeaking: () => { },
         };
     }
 
@@ -597,9 +637,13 @@ const startRecording = useCallback(async (forcedSessionId?: string) => {
         isRecording,
         isProcessing,
         isSpeaking,
+        isPaused,
         error,
         liveStatus,
         startRecording,
         interruptVoice,
+        pauseRecording,
+        resumeRecording,
+        stopSpeaking,
     };
 };

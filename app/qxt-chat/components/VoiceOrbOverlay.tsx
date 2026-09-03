@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState, useCallback } from "react";
+import { Pause, Play, Send, X, Square } from "lucide-react";
 
 type OrbState = "listening" | "processing" | "speaking";
 
@@ -8,20 +9,77 @@ type Props = {
   isRecording: boolean;
   isProcessing: boolean;
   isSpeaking: boolean;
+  isPaused: boolean;
   stream: MediaStream | null;
   onCancel: () => void;
+  onSend: () => void;
+  onPause: () => void;
+  onResume: () => void;
+  onStopSpeaking: () => void;
 };
 
-// ✅ Color themes per state — no harsh red, calm modern gradients
 const THEME: Record<OrbState, { from: string; to: string; ring: string; glow: string }> = {
   listening: { from: "#818cf8", to: "#6366f1", ring: "rgba(129,140,248,0.35)", glow: "rgba(99,102,241,0.45)" },
   processing: { from: "#818cf8", to: "#6366f1", ring: "rgba(129,140,248,0.25)", glow: "rgba(99,102,241,0.35)" },
   speaking: { from: "#34d399", to: "#10b981", ring: "rgba(52,211,153,0.35)", glow: "rgba(16,185,129,0.45)" },
 };
 
-export function VoiceOrbOverlay({ isRecording, isProcessing, isSpeaking, stream, onCancel }: Props) {
+// ✅ Glass-morphism pill control — matches the orb's modern aesthetic
+// instead of dropping plain icon buttons next to it.
+function GlassButton({
+  onClick,
+  label,
+  danger,
+  children,
+}: {
+  onClick: () => void;
+  label: string;
+  danger?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      className="flex items-center justify-center rounded-full transition-all duration-150 active:scale-90"
+      style={{
+        width: 44,
+        height: 44,
+        background: "rgba(255,255,255,0.10)",
+        backdropFilter: "blur(12px)",
+        WebkitBackdropFilter: "blur(12px)",
+        border: "1px solid rgba(255,255,255,0.14)",
+        color: danger ? "rgba(248,113,113,0.9)" : "rgba(255,255,255,0.85)",
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = danger
+          ? "rgba(248,113,113,0.18)"
+          : "rgba(255,255,255,0.18)";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = "rgba(255,255,255,0.10)";
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+export function VoiceOrbOverlay({
+  isRecording,
+  isProcessing,
+  isSpeaking,
+  isPaused,
+  stream,
+  onCancel,
+  onSend,
+  onPause,
+  onResume,
+  onStopSpeaking,
+}: Props) {
   const [mounted, setMounted] = useState(false);
-  const [level, setLevel] = useState(0); // 0..1 audio level for the pulsing ring
+  const [level, setLevel] = useState(0);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const rafRef = useRef<number | null>(null);
@@ -30,7 +88,6 @@ export function VoiceOrbOverlay({ isRecording, isProcessing, isSpeaking, stream,
   const state: OrbState = isSpeaking ? "speaking" : isProcessing ? "processing" : "listening";
   const theme = THEME[state];
 
-  // Mount/unmount with a tick of delay so the fade-out transition can play
   useEffect(() => {
     if (active) {
       setMounted(true);
@@ -40,10 +97,6 @@ export function VoiceOrbOverlay({ isRecording, isProcessing, isSpeaking, stream,
     return () => clearTimeout(t);
   }, [active]);
 
-  // ✅ Real audio level analysis — hooked directly to the actual mic
-  // stream (previously ChatFooter waited on window.__onVoiceStreamReady,
-  // a global no one ever called — this connects directly to the
-  // `stream` prop passed down from useVoice's onStreamAction instead).
   const tick = useCallback(() => {
     const analyser = analyserRef.current;
     if (!analyser) return;
@@ -55,7 +108,7 @@ export function VoiceOrbOverlay({ isRecording, isProcessing, isSpeaking, stream,
   }, []);
 
   useEffect(() => {
-    if (!stream || !isRecording) {
+    if (!stream || !isRecording || isPaused) {
       setLevel(0);
       return;
     }
@@ -79,32 +132,31 @@ export function VoiceOrbOverlay({ isRecording, isProcessing, isSpeaking, stream,
       analyserRef.current = null;
       setLevel(0);
     };
-  }, [stream, isRecording, tick]);
+  }, [stream, isRecording, isPaused, tick]);
 
-  // Gentle idle pulse for processing/speaking (no live mic level then)
   const [idlePulse, setIdlePulse] = useState(0);
   useEffect(() => {
-    if (isRecording) return; // real level drives it while listening
+    if (isRecording && !isPaused) return;
     let raf: number;
     const start = performance.now();
     const loop = (t: number) => {
       const elapsed = (t - start) / 1000;
-      setIdlePulse((Math.sin(elapsed * 2.4) + 1) / 2); // 0..1 smooth breathing
+      setIdlePulse((Math.sin(elapsed * 2.4) + 1) / 2);
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, [isRecording, state]);
+  }, [isRecording, isPaused, state]);
 
   if (!mounted) return null;
 
-  const ringLevel = isRecording ? level : idlePulse;
+  const ringLevel = isRecording && !isPaused ? level : isPaused ? 0 : idlePulse;
   const ringScale = 1 + ringLevel * 0.35;
   const isSpinning = state === "processing";
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center"
+      className="fixed inset-0 z-[100] flex flex-col items-center justify-center gap-8"
       style={{
         backdropFilter: "blur(6px)",
         WebkitBackdropFilter: "blur(6px)",
@@ -113,8 +165,18 @@ export function VoiceOrbOverlay({ isRecording, isProcessing, isSpeaking, stream,
         transition: "opacity 260ms ease",
         pointerEvents: active ? "auto" : "none",
       }}
-      onClick={onCancel}
     >
+      {/* Status hint */}
+      <div
+        className="text-white/70 text-sm font-medium tracking-wide"
+        style={{ opacity: active ? 1 : 0, transition: "opacity 300ms ease 100ms" }}
+      >
+        {state === "listening" && (isPaused ? "Paused" : "Listening...")}
+        {state === "processing" && "Thinking..."}
+        {state === "speaking" && "Speaking..."}
+      </div>
+
+      {/* Orb */}
       <div
         className="relative flex items-center justify-center"
         style={{
@@ -123,9 +185,7 @@ export function VoiceOrbOverlay({ isRecording, isProcessing, isSpeaking, stream,
           transform: `scale(${active ? 1 : 0.85})`,
           transition: "transform 260ms cubic-bezier(0.34, 1.56, 0.64, 1)",
         }}
-        onClick={(e) => e.stopPropagation()}
       >
-        {/* Outer pulsing ring — reacts to real audio level */}
         <div
           className="absolute rounded-full"
           style={{
@@ -133,11 +193,10 @@ export function VoiceOrbOverlay({ isRecording, isProcessing, isSpeaking, stream,
             height: 140,
             background: theme.ring,
             transform: `scale(${ringScale})`,
-            transition: isRecording ? "transform 80ms linear" : "transform 400ms ease",
+            transition: isRecording && !isPaused ? "transform 80ms linear" : "transform 400ms ease",
             filter: "blur(2px)",
           }}
         />
-        {/* Soft outer glow */}
         <div
           className="absolute rounded-full"
           style={{
@@ -146,7 +205,6 @@ export function VoiceOrbOverlay({ isRecording, isProcessing, isSpeaking, stream,
             background: `radial-gradient(circle, ${theme.glow} 0%, transparent 70%)`,
           }}
         />
-        {/* Core orb */}
         <div
           className="relative rounded-full flex items-center justify-center"
           style={{
@@ -155,6 +213,7 @@ export function VoiceOrbOverlay({ isRecording, isProcessing, isSpeaking, stream,
             background: `linear-gradient(135deg, ${theme.from}, ${theme.to})`,
             boxShadow: `0 0 30px ${theme.glow}`,
             transition: "background 400ms ease",
+            opacity: isPaused ? 0.55 : 1,
           }}
         >
           {isSpinning && (
@@ -171,28 +230,34 @@ export function VoiceOrbOverlay({ isRecording, isProcessing, isSpeaking, stream,
         </div>
       </div>
 
-      {/* Hint text */}
+      {/* Controls — glass pills, contextual to state */}
       <div
-        className="absolute text-white/70 text-sm font-medium tracking-wide"
+        className="flex items-center gap-4"
         style={{
-          bottom: "calc(50% - 130px)",
           opacity: active ? 1 : 0,
-          transition: "opacity 300ms ease 100ms",
+          transform: active ? "translateY(0)" : "translateY(6px)",
+          transition: "opacity 260ms ease 80ms, transform 260ms ease 80ms",
         }}
       >
-        {state === "listening" && "بيسمعك..."}
-        {state === "processing" && "بيفكر..."}
-        {state === "speaking" && "بيرد..."}
-      </div>
-      <div
-        className="absolute text-white/40 text-xs"
-        style={{
-          bottom: "calc(50% - 155px)",
-          opacity: active ? 1 : 0,
-          transition: "opacity 300ms ease 150ms",
-        }}
-      >
-        اضغط في أي مكان للإلغاء
+        {isRecording && (
+          <>
+            <GlassButton onClick={onCancel} label="Cancel" danger>
+              <X className="w-4.5 h-4.5" strokeWidth={2} />
+            </GlassButton>
+            <GlassButton onClick={isPaused ? onResume : onPause} label={isPaused ? "Resume" : "Pause"}>
+              {isPaused ? <Play className="w-4.5 h-4.5" strokeWidth={2} /> : <Pause className="w-4.5 h-4.5" strokeWidth={2} />}
+            </GlassButton>
+            <GlassButton onClick={onSend} label="Send">
+              <Send className="w-4.5 h-4.5" strokeWidth={2} />
+            </GlassButton>
+          </>
+        )}
+
+        {(isProcessing || isSpeaking) && (
+          <GlassButton onClick={onStopSpeaking} label="Stop">
+            <Square className="w-4 h-4" strokeWidth={2} fill="currentColor" />
+          </GlassButton>
+        )}
       </div>
 
       <style jsx>{`
