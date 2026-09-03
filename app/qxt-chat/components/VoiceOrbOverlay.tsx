@@ -10,12 +10,24 @@ type Props = {
   isProcessing: boolean;
   isSpeaking: boolean;
   isPaused: boolean;
+  voiceStage?: string | null;
+  voiceDetail?: string;
   stream: MediaStream | null;
   onCancel: () => void;
   onSend: () => void;
   onPause: () => void;
   onResume: () => void;
   onStopSpeaking: () => void;
+};
+
+// ✅ Fallback labels for stages the backend may send that don't have
+// rich detail text (or before the first status event arrives).
+const STAGE_LABEL: Record<string, string> = {
+  thinking: "Thinking",
+  searching: "Searching",
+  analyzing: "Analyzing",
+  generating: "Generating",
+  writing: "Writing",
 };
 
 const THEME: Record<OrbState, { from: string; to: string; ring: string; glow: string }> = {
@@ -71,6 +83,8 @@ export function VoiceOrbOverlay({
   isProcessing,
   isSpeaking,
   isPaused,
+  voiceStage,
+  voiceDetail,
   stream,
   onCancel,
   onSend,
@@ -172,7 +186,11 @@ export function VoiceOrbOverlay({
         style={{ opacity: active ? 1 : 0, transition: "opacity 300ms ease 100ms" }}
       >
         {state === "listening" && (isPaused ? "Paused" : "Listening...")}
-        {state === "processing" && "Thinking..."}
+        {state === "processing" && (
+          voiceStage && STAGE_LABEL[voiceStage]
+            ? `${STAGE_LABEL[voiceStage]}${voiceDetail ? ` — "${voiceDetail}"` : ""}`
+            : "Thinking..."
+        )}
         {state === "speaking" && "Speaking..."}
       </div>
 

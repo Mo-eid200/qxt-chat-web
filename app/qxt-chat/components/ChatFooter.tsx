@@ -248,6 +248,7 @@ const handleVoiceSessionCreated = useCallback((id: string) => {
   const {
     isRecording = false, isProcessing = false, isSpeaking = false,
     isPaused = false,
+    voiceStage = null, voiceDetail = undefined,
     liveStatus = "", error: voiceError = null,
     startRecording = async () => {},
     interruptVoice = async () => {},
@@ -587,26 +588,10 @@ const handleSend = useCallback(async () => {
         </div>
       )}
 
-      {/* ── Recording bar ── */}
-      {isRecording && (
-        <div className="mb-2 flex items-center gap-3 px-3.5 py-2 rounded-xl border bg-red-500/8 border-red-500/20">
-          <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse shrink-0" />
-          <span className="text-[11px] font-mono text-red-400 tabular-nums w-10">{formattedTime}</span>
-          <canvas ref={canvasRef} width={120} height={24} className="flex-1 max-w-[120px] opacity-80" />
-        </div>
-      )}
-
-      {/* ── Processing bar ── */}
-      {isProcessing && !isRecording && (
-        <div className={`mb-2 flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border text-sm ${
-          darkMode
-            ? "bg-blue-950/40 border-blue-900/40 text-blue-300"
-            : "bg-blue-50 border-blue-200 text-blue-700"
-        }`}>
-          <Loader2 className="w-4 h-4 animate-spin shrink-0" />
-          <span>{liveStatus || "Processing voice..."}</span>
-        </div>
-      )}
+      {/* ✅ Recording/Processing bars removed — the VoiceOrbOverlay
+          (fixed, center-screen orb) now shows this state instead,
+          replacing the old canvas waveform + "🧠 Transcribing..." bar
+          that used to sit here above the composer. */}
 
       {/* ── Pending attachments ── */}
       {(pendingImages.length > 0 || pendingDocuments.length > 0) && (
@@ -929,6 +914,8 @@ ${darkMode ? "text-white placeholder:text-white/25" : "text-black placeholder:te
         isProcessing={isProcessing}
         isSpeaking={isSpeaking}
         isPaused={isPaused}
+        voiceStage={voiceStage}
+        voiceDetail={voiceDetail}
         stream={voiceStream}
         onCancel={handleInterruptVoice}
         onSend={handleVoiceToggle}

@@ -50,6 +50,12 @@ export const useVoice = ({
     const [isProcessing, setIsProcessing] = useState(false);
     const [isSpeaking, setIsSpeaking] = useState(false);
     const [isPaused, setIsPaused] = useState(false);
+    // ✅ Real AI activity status — same {stage, detail} events the
+    // typed chat's AIStatus.tsx already consumes (thinking/searching/
+    // analyzing/generating/writing + rich per-tool detail text), now
+    // also driving the voice orb instead of static placeholder text.
+    const [voiceStage, setVoiceStage] = useState<string | null>(null);
+    const [voiceDetail, setVoiceDetail] = useState<string | undefined>(undefined);
     const [error, setError] = useState<string | null>(null);
     const [liveStatus, setLiveStatus] = useState<string>("");
 
@@ -206,6 +212,10 @@ export const useVoice = ({
    // ========================
 // 📩 1) META REQUEST (STT + LLM) -> JSON
 // ========================
+// ✅ NEW: reads the backend's SSE stream (user_text -> text_delta* ->
+// done) instead of waiting for one JSON blob. The assistant bubble
+// now fills in token-by-token exactly like typed chat, instead of
+// the orb sitting on "Thinking..." for the whole generation.
 const fetchMeta = useCallback(
     async (blob: Blob, turnId: string): Promise<MetaResponse> => {
         const sid = sessionIdRef.current;
@@ -213,7 +223,7 @@ const fetchMeta = useCallback(
         if (!sid) throw new Error("No session ID");
         if (!blob?.size) throw new Error("Empty blob");
 
-        setLiveStatus("🧠 Transcribing & generating text...");
+        setLiveStatus("🧠 Transcribing...");
 
         const formData = new FormData();
         formData.append(
@@ -241,29 +251,90 @@ const fetchMeta = useCallback(
             throw new Error(t || `${res.status}`);
         }
 
-        const meta = (await res.json()) as MetaResponse;
+        if (!res.body) throw new Error("No response body");
 
-        if (!meta?.user_text || !meta?.response_text) {
-            throw new Error("Invalid meta response (missing user_text/response_text)");
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder("utf-8");
+        let buffer = "";
+        let responseText = "";
+        let doneMeta: MetaResponse | null = null;
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            let boundary: number;
+            while ((boundary = buffer.indexOf("\n\n")) !== -1) {
+                const chunk = buffer.slice(0, boundary).trim();
+                buffer = buffer.slice(boundary + 2);
+                if (!chunk.startsWith("data:")) continue;
+                const data = chunk.replace("data:", "").trim();
+                if (!data) continue;
+
+                let evt: any;
+                try {
+                    evt = JSON.parse(data);
+                } catch {
+                    continue;
+                }
+
+                // ✅ Same status events the typed-chat SSE stream
+                // carries (choices[0].delta.status -> {stage, detail}).
+                // The voice pipeline's event_stream() forwards them
+                // as top-level `status` fields on its own events —
+                // check for that before falling through to the
+                // voice-specific event types below.
+                if (evt.status?.stage) {
+                    setVoiceStage(evt.status.stage);
+                    setVoiceDetail(evt.status.detail);
+                }
+
+                if (evt.type === "user_text") {
+                    onMessageAction?.({
+                        id: turnId,
+                        role: "user",
+                        kind: "text",
+                        text: evt.text,
+                    });
+                    setLiveStatus("💬 Replying...");
+                } else if (evt.type === "text_delta") {
+                    responseText += evt.delta;
+                    onMessageAction?.({
+                        id: `assistant-${turnId}`,
+                        role: "assistant",
+                        kind: "stream_update",
+                        text: responseText,
+                    });
+                } else if (evt.type === "error") {
+                    throw new Error(evt.message || "Voice reply failed");
+                } else if (evt.type === "done") {
+                    doneMeta = {
+                        trace_id: evt.trace_id,
+                        session_id: evt.session_id,
+                        user_request_id: evt.user_request_id,
+                        assistant_request_id: evt.assistant_request_id,
+                        user_text: evt.user_text,
+                        response_text: evt.response_text,
+                        language: evt.language,
+                    };
+                }
+            }
         }
 
-        lastMetaRef.current = meta;
-
-        onMessageAction?.({
-            id: turnId,
-            role: "user",
-            kind: "text",
-            text: meta.user_text,
-        });
+        if (!doneMeta?.user_text || !doneMeta?.response_text) {
+            throw new Error("Invalid meta response (missing user_text/response_text)");
+        }
 
         onMessageAction?.({
             id: `assistant-${turnId}`,
             role: "assistant",
             kind: "text",
-            text: meta.response_text,
+            text: doneMeta.response_text,
         });
 
-        return meta;
+        lastMetaRef.current = doneMeta;
+
+        return doneMeta;
     },
     [
         API_BASE,
@@ -623,6 +694,8 @@ const startRecording = useCallback(async (forcedSessionId?: string) => {
             isProcessing: false,
             isSpeaking: false,
             isPaused: false,
+            voiceStage: null,
+            voiceDetail: undefined,
             error: null,
             liveStatus: "",
             startRecording: async () => { },
@@ -638,6 +711,8 @@ const startRecording = useCallback(async (forcedSessionId?: string) => {
         isProcessing,
         isSpeaking,
         isPaused,
+        voiceStage,
+        voiceDetail,
         error,
         liveStatus,
         startRecording,
