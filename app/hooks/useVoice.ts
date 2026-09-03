@@ -95,6 +95,13 @@ export const useVoice = ({
     const audioQueueRef = useRef<string[]>([]);
     const isPlayingQueueRef = useRef(false);
     const streamEndedRef = useRef(false);
+    // ✅ Set when the user explicitly stops playback mid-reply. Any
+    // audio_chunk_ready events that arrive from the backend AFTER
+    // this point (the SSE stream keeps generating even after the
+    // client stops listening) get silently dropped instead of
+    // auto-playing the next sentence — this was the "stop, then it
+    // plays the next chunk anyway" bug.
+    const stoppedRef = useRef(false);
 
     // last meta (to correlate)
     const lastMetaRef = useRef<MetaResponse | null>(null);
@@ -202,6 +209,7 @@ export const useVoice = ({
 
     const enqueueAudioChunk = useCallback(
         (audioUrl: string) => {
+            if (stoppedRef.current) return;
             audioQueueRef.current.push(audioUrl);
             if (!isPlayingQueueRef.current) {
                 playNextInQueue();
@@ -229,6 +237,7 @@ export const useVoice = ({
             audioQueueRef.current = [];
             isPlayingQueueRef.current = false;
             streamEndedRef.current = false;
+            stoppedRef.current = false;
 
             const formData = new FormData();
             formData.append(
@@ -560,6 +569,7 @@ export const useVoice = ({
     // matching the "stop while it's speaking" control from
     // ChatGPT/Claude voice mode.
     const stopSpeaking = useCallback(() => {
+        stoppedRef.current = true;
         audioQueueRef.current = [];
         isPlayingQueueRef.current = false;
         setIsSpeaking(false);
@@ -574,6 +584,7 @@ export const useVoice = ({
     const interruptVoice = useCallback(async () => {
         try {
             isCancelledRef.current = true;
+            stoppedRef.current = true;
             audioQueueRef.current = [];
             isPlayingQueueRef.current = false;
             setIsSpeaking(false);
