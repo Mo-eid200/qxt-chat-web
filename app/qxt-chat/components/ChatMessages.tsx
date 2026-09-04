@@ -868,7 +868,7 @@ const hasStoredAudio = !!(
     <>
       <div
         dir="auto"
-        className={`group ${bubbleWidthClass} px-5 py-4 text-base leading-relaxed backdrop-blur-xl shadow-lg ${bubbleClass} transition-all duration-200 hover:shadow-xl`}
+        className={`group ${bubbleWidthClass} px-5 py-4 text-base leading-relaxed backdrop-blur-xl shadow-lg ${bubbleClass} transition-all duration-200 hover:shadow-xl ${msg.kind === "stream_update" ? "streaming-text" : ""}`}
       >
         {!isUser && (
           <div className="text-xs font-semibold opacity-70 mb-2.5 tracking-wide flex items-center gap-1.5">
