@@ -670,6 +670,21 @@ ChatImage.displayName = "ChatImage";
    MESSAGE BUBBLE
 ====================================================== */
 
+// ✅ Explicit per-message direction detection. dir="auto" alone
+// wasn't reliably flipping text-align in this app's layout, so we
+// detect the dominant script directly and apply text-right/text-left
+// as an explicit class instead of relying on the browser's Bidi
+// heuristic.
+const RTL_CHAR_RE = /[\u0591-\u07FF\uFB1D-\uFDFD\uFE70-\uFEFC]/;
+
+function detectTextDirection(text: string): "rtl" | "ltr" {
+  for (const ch of text) {
+    if (RTL_CHAR_RE.test(ch)) return "rtl";
+    if (/[a-zA-Z]/.test(ch)) return "ltr";
+  }
+  return "ltr";
+}
+
 const MessageBubble = memo(function MessageBubble({
   msg,
   idx,
@@ -867,8 +882,8 @@ const hasStoredAudio = !!(
   return (
     <>
       <div
-        dir="auto"
-        className={`group ${bubbleWidthClass} px-5 py-4 text-base leading-relaxed backdrop-blur-xl shadow-lg ${bubbleClass} transition-all duration-200 hover:shadow-xl ${msg.kind === "stream_update" ? "streaming-text" : ""}`}
+        dir={detectTextDirection(sanitizedContent)}
+        className={`group ${bubbleWidthClass} px-5 py-4 text-base leading-relaxed backdrop-blur-xl shadow-lg ${bubbleClass} transition-all duration-200 hover:shadow-xl ${msg.kind === "stream_update" ? "streaming-text" : ""} ${detectTextDirection(sanitizedContent) === "rtl" ? "text-right" : "text-left"}`}
       >
         {!isUser && (
           <div className="text-xs font-semibold opacity-70 mb-2.5 tracking-wide flex items-center gap-1.5">
