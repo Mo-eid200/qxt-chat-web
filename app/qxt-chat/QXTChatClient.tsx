@@ -96,6 +96,16 @@ function QXTChatInner({ agentRuntime }: { agentRuntime?: AgentRuntime }) {
   const [loading, setLoading] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [streamText, setStreamText] = useState("");
+  // ✅ Live code-panel streaming refs. bubbleFullTextRef holds the
+  // chat-bubble text with any open/streaming code block EXCLUDED
+  // (only the panel gets that content) — reset at the start of each
+  // new assistant turn. The others track fence-parsing state across
+  // deltas without re-scanning the whole accumulated text each time.
+  const bubbleFullTextRef = useRef("");
+  const codeStreamActiveRef = useRef(false);
+  const codeStreamLangBufferRef = useRef("");
+  const codeStreamLangDoneRef = useRef(false);
+  const codeStreamBodyRef = useRef("");
   const [darkMode, setDarkMode] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [lang, setLang] = useState<"en" | "ar">("en");
@@ -503,6 +513,15 @@ useChatHydration({
         let fullText = "";
         let assistantAdded = false;
 
+        // ✅ Reset per-turn code-streaming state — otherwise a
+        // previous message's leftover buffer/flags would bleed into
+        // this new one.
+        bubbleFullTextRef.current = "";
+        codeStreamActiveRef.current = false;
+        codeStreamLangBufferRef.current = "";
+        codeStreamLangDoneRef.current = false;
+        codeStreamBodyRef.current = "";
+
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
@@ -569,29 +588,67 @@ useChatHydration({
               fullText += delta;
               setStreamText(fullText);
 
-              // ✅ Live code-fence detection: as soon as an OPEN ```
-              // appears with no matching close ``` yet, open the side
-              // panel immediately and stream everything after the
-              // fence into it in real time — Claude Artifacts /
-              // ChatGPT Canvas style, instead of only showing code
-              // after the whole message finishes. The compact card
-              // in the chat bubble (CodeBlock) still renders normally
-              // once the message is done; this just makes the panel
-              // itself open live instead of only via that card's
-              // click handler.
-              {
-                const fenceMatches = fullText.match(/```/g);
-                const fenceCount = fenceMatches ? fenceMatches.length : 0;
-                if (fenceCount % 2 === 1) {
-                  const lastFenceIdx = fullText.lastIndexOf("```");
-                  const afterFence = fullText.slice(lastFenceIdx + 3);
-                  const firstNewline = afterFence.indexOf("\n");
-                  const codeLanguage = firstNewline === -1
-                    ? afterFence.trim()
-                    : afterFence.slice(0, firstNewline).trim();
-                  const codeSoFar = firstNewline === -1 ? "" : afterFence.slice(firstNewline + 1);
-                  setCodePanel({ code: codeSoFar, language: codeLanguage || "plaintext" });
+              // ✅ Live code-fence detection, O(delta) not O(fullText):
+              // tracks "are we currently inside an open ``` block?" in
+              // a ref instead of re-scanning the whole accumulated
+              // text on every single token (that full-text regex scan
+              // growing every delta was what caused the visible
+              // stutter). Once inside a code block, its content is
+              // streamed straight into the side panel AND excluded
+              // from the chat bubble's own text — the bubble shows
+              // everything up to the opening fence, then nothing
+              // until the closing fence, at which point the compact
+              // CodeBlock card takes over (rendered from the final
+              // saved message content, same as before).
+              let deltaRemaining = delta;
+              let bubbleTextToAppend = "";
+
+              while (deltaRemaining.length > 0) {
+                if (!codeStreamActiveRef.current) {
+                  const fenceIdx = deltaRemaining.indexOf("```");
+                  if (fenceIdx === -1) {
+                    bubbleTextToAppend += deltaRemaining;
+                    deltaRemaining = "";
+                  } else {
+                    bubbleTextToAppend += deltaRemaining.slice(0, fenceIdx);
+                    deltaRemaining = deltaRemaining.slice(fenceIdx + 3);
+                    codeStreamActiveRef.current = true;
+                    codeStreamLangBufferRef.current = "";
+                    codeStreamLangDoneRef.current = false;
+                    codeStreamBodyRef.current = "";
+                    setCodePanel({ code: "", language: "plaintext" });
+                  }
+                } else {
+                  const closeIdx = deltaRemaining.indexOf("```");
+                  const chunk = closeIdx === -1 ? deltaRemaining : deltaRemaining.slice(0, closeIdx);
+
+                  if (!codeStreamLangDoneRef.current) {
+                    const nl = (codeStreamLangBufferRef.current + chunk).indexOf("\n");
+                    if (nl === -1) {
+                      codeStreamLangBufferRef.current += chunk;
+                    } else {
+                      const combined = codeStreamLangBufferRef.current + chunk;
+                      const lang = combined.slice(0, nl).trim();
+                      codeStreamBodyRef.current = combined.slice(nl + 1);
+                      codeStreamLangDoneRef.current = true;
+                      setCodePanel({ code: codeStreamBodyRef.current, language: lang || "plaintext" });
+                    }
+                  } else {
+                    codeStreamBodyRef.current += chunk;
+                    setCodePanel((prev) => prev ? { ...prev, code: codeStreamBodyRef.current } : prev);
+                  }
+
+                  if (closeIdx === -1) {
+                    deltaRemaining = "";
+                  } else {
+                    deltaRemaining = deltaRemaining.slice(closeIdx + 3);
+                    codeStreamActiveRef.current = false;
+                  }
                 }
+              }
+
+              if (bubbleTextToAppend) {
+                bubbleFullTextRef.current += bubbleTextToAppend;
               }
 
               if (!assistantAdded) {
@@ -600,14 +657,14 @@ useChatHydration({
                   const newMsg: ChatMessage = {
                     id: crypto.randomUUID(),
                     role: "assistant",
-                    content: delta,
+                    content: bubbleFullTextRef.current,
                     kind: "text",
                   };
                   const updated = [...prev, newMsg];
                   messagesRef.current = updated;
                   return updated;
                 });
-              } else {
+              } else if (bubbleTextToAppend) {
                 setMessages((prev) => {
                   if (!prev.length) return prev;
 
@@ -616,7 +673,7 @@ useChatHydration({
 
                   const updated = [
                     ...prev.slice(0, -1),
-                    { ...last, content: last.content + delta },
+                    { ...last, content: bubbleFullTextRef.current },
                   ];
                   messagesRef.current = updated;
                   return updated;
