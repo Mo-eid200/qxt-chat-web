@@ -990,24 +990,29 @@ const hasStoredAudio = !!(
               </div>
             )}
 
-            <MessageActions
-              role={isUser ? "user" : "assistant"}
-              content={sanitizedContent}
-              messageId={String(idx)}
-              onSpeakAction={hasStoredAudio ? handlePlayStoredAudio : handleSpeakText}
-              isSpeaking={speechState === "playing"}
-              isLoading={speechState === "loading"}
-              canEdit={isUser}
-              onCopyAction={() => handleCopy(sanitizedContent, idx)}
-              onEditAction={() => startEdit(idx, sanitizedContent)}
-              onReactionAction={(r: any) => handleReaction(idx, r)}
-              onShareAction={() => handleShare(sanitizedContent)}
-              onReportAction={() => handleReport(sanitizedContent)}
-              reaction={reactions[idx]}
-              isCopied={copiedIndex === idx}
-              darkMode={darkMode}
-              lang={lang}
-            />
+            {/* ✅ Action row hidden until the bubble is hovered — relies
+                on the bubble's own "group" class (already present on
+                its wrapper) so no extra state/JS is needed. */}
+            <div className="opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-150">
+              <MessageActions
+                role={isUser ? "user" : "assistant"}
+                content={sanitizedContent}
+                messageId={String(idx)}
+                onSpeakAction={hasStoredAudio ? handlePlayStoredAudio : handleSpeakText}
+                isSpeaking={speechState === "playing"}
+                isLoading={speechState === "loading"}
+                canEdit={isUser}
+                onCopyAction={() => handleCopy(sanitizedContent, idx)}
+                onEditAction={() => startEdit(idx, sanitizedContent)}
+                onReactionAction={(r: any) => handleReaction(idx, r)}
+                onShareAction={() => handleShare(sanitizedContent)}
+                onReportAction={() => handleReport(sanitizedContent)}
+                reaction={reactions[idx]}
+                isCopied={copiedIndex === idx}
+                darkMode={darkMode}
+                lang={lang}
+              />
+            </div>
           </>
         )}
       </div>
