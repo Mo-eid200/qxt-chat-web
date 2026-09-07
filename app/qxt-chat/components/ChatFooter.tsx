@@ -409,17 +409,29 @@ const handleSend = useCallback(async () => {
         ? `\n\n\`\`\`${pendingCode.language}\n${pendingCode.code}\n\`\`\``
         : "";
 
-      await onSend({
-        text:   input.trim() + codeBlock,
-        model:  currentModel!.id,
-        isVoiceActive: false,
-        images: pendingImages.filter((i) => i.url).map((i) => i.url),
-        files:  pendingDocuments.filter((f) => f.url),
-      });
+      // ✅ FIX: clear the pending-attachment preview (and the input
+      // box) BEFORE awaiting onSend, not after — onSend awaits the
+      // full model reply, so clearing these afterward meant an
+      // attached image/document stayed stuck in the "pending" bar
+      // above the composer for the whole reply duration instead of
+      // moving into the conversation immediately, like every other
+      // chat platform's send behavior.
+      const outgoingImages = pendingImages.filter((i) => i.url).map((i) => i.url);
+      const outgoingFiles = pendingDocuments.filter((f) => f.url);
+      const outgoingText = input.trim() + codeBlock;
+
       onChange("");
       setPendingImages([]);
       setPendingDocuments?.([]);
       setPendingCode(null);
+
+      await onSend({
+        text:   outgoingText,
+        model:  currentModel!.id,
+        isVoiceActive: false,
+        images: outgoingImages,
+        files:  outgoingFiles,
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to send");
     }

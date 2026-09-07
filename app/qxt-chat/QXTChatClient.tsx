@@ -216,6 +216,7 @@ function QXTChatInner({ agentRuntime }: { agentRuntime?: AgentRuntime }) {
     setDocumentPanel(null);
   }, []);
 
+
   const busy = loading || streaming || !!pendingStage;
   const composerMode = shouldDockBottom ? "bottom" : "center";
   const isAr = lang === "ar";
@@ -296,6 +297,15 @@ function QXTChatInner({ agentRuntime }: { agentRuntime?: AgentRuntime }) {
   stopRequest,
   setMessages,
 });
+
+// ✅ Auto-close both side panels when the active session changes —
+// without this, a panel opened in one conversation stayed open and
+// could visually overlap content in a completely unrelated session
+// switched to afterward.
+useEffect(() => {
+  setCodePanel(null);
+  setDocumentPanel(null);
+}, [sessionId]);
 
 useChatHydration({
   loadingUser,
