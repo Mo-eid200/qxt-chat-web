@@ -39,6 +39,7 @@ import { useVoiceMessageSync } from "../hooks/useVoiceMessageSync";
 import { useChatLifecycle } from "../hooks/useChatLifecycle";
 import { useSessionAttachments } from "../hooks/useSessionAttachments";
 import { CodePanel } from "./components/CodePanel";
+import { DocumentPanel } from "./components/DocumentPanel";
 import type { AgentRuntime } from "../types/agent";
 import type { ChatMessage } from "../types/chat";
 
@@ -194,6 +195,25 @@ function QXTChatInner({ agentRuntime }: { agentRuntime?: AgentRuntime }) {
 
   const handleCloseCodePanel = useCallback(() => {
     setCodePanel(null);
+  }, []);
+
+  // ✅ Mirrors codePanel exactly, for generate_document results —
+  // separate state since a message could theoretically reference
+  // both a code block and a document.
+  const [documentPanel, setDocumentPanel] = useState<{
+    url: string; title: string; format: "pdf" | "docx" | "xlsx" | "pptx"; isLoading?: boolean;
+  } | null>(null);
+  const [documentPanelWidth, setDocumentPanelWidth] = useState(40);
+
+  const handleOpenDocumentPanel = useCallback(
+    (url: string, title: string, format: "pdf" | "docx" | "xlsx" | "pptx") => {
+      setDocumentPanel({ url, title, format });
+    },
+    []
+  );
+
+  const handleCloseDocumentPanel = useCallback(() => {
+    setDocumentPanel(null);
   }, []);
 
   const busy = loading || streaming || !!pendingStage;
@@ -649,6 +669,26 @@ useChatHydration({
 
               if (bubbleTextToAppend) {
                 bubbleFullTextRef.current += bubbleTextToAppend;
+
+                // ✅ Detects a generated document link the moment it
+                // appears in the streamed text (e.g. a Markdown link
+                // to a .pdf/.docx/.xlsx/.pptx on R2) and opens the
+                // preview panel automatically — mirrors the code
+                // panel's "open live" behavior, but for documents
+                // (which arrive as one complete link, not token-by-
+                // token content, so a single regex check on the full
+                // text-so-far is enough).
+                const docMatch = bubbleFullTextRef.current.match(
+                  /\[([^\]]*)\]\((https?:\/\/[^\s)]+\.(pdf|docx|xlsx|pptx))\)/i
+                );
+                if (docMatch && !documentPanel) {
+                  const [, linkText, docUrl, docExt] = docMatch;
+                  setDocumentPanel({
+                    url: docUrl,
+                    title: linkText || "Document",
+                    format: docExt.toLowerCase() as "pdf" | "docx" | "xlsx" | "pptx",
+                  });
+                }
               }
 
               if (!assistantAdded) {
@@ -970,6 +1010,7 @@ onToggleUnread={() => {
         pendingDetail={pendingDetail}
         bottomRef={bottomRef}
         onOpenCodePanel={handleOpenCodePanel}
+        onOpenDocumentPanel={handleOpenDocumentPanel}
       />
     </div>
   )}
@@ -979,7 +1020,7 @@ onToggleUnread={() => {
   <div className="sticky bottom-4 z-50 w-full">
     <div
       className={
-        codePanel
+        codePanel || documentPanel
           ? "w-full px-4"
           : "mx-auto w-full max-w-[740px] px-4"
       }
@@ -1045,6 +1086,27 @@ onToggleUnread={() => {
               onClose={handleCloseCodePanel}
               width={codePanelWidth}
               onWidthChange={setCodePanelWidth}
+            />
+          )}
+        </div>
+
+        {/* ✅ Mirrors the code panel's split-view container exactly —
+            separate div/state so a document and a code block could
+            (in principle) both be open, though only one panel is
+            ever shown at a time in the current UI. */}
+        <div
+          className="overflow-hidden transition-all duration-300 ease-out"
+          style={{ width: documentPanel ? `${documentPanelWidth}%` : "0%" }}
+        >
+          {documentPanel && (
+            <DocumentPanel
+              url={documentPanel.url}
+              title={documentPanel.title}
+              format={documentPanel.format}
+              isLoading={documentPanel.isLoading}
+              onClose={handleCloseDocumentPanel}
+              width={documentPanelWidth}
+              onWidthChange={setDocumentPanelWidth}
             />
           )}
         </div>

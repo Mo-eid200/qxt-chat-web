@@ -12,6 +12,8 @@ import {
   ChevronRight,
   MessageCircle,
   Share2,
+  FileText,
+  ChevronRight as ChevronRightIcon,
 } from "lucide-react";
 
 import ReactMarkdown from "react-markdown";
@@ -42,6 +44,7 @@ type Props = {
   assistantName: string;
   darkMode: boolean;
   onOpenCodePanel?: (code: string, language: string) => void;
+  onOpenDocumentPanel?: (url: string, title: string, format: "pdf" | "docx" | "xlsx" | "pptx") => void;
 
   messageDir: "rtl" | "ltr";
   messageTextAlign: "text-right" | "text-left";
@@ -497,9 +500,11 @@ ImageModal.displayName = "ImageModal";
 const MarkdownContent = memo(function MarkdownContent({
   content,
   onOpenCodePanel,
+  onOpenDocumentPanel,
 }: {
   content: string;
   onOpenCodePanel?: (code: string, language: string) => void;
+  onOpenDocumentPanel?: (url: string, title: string, format: "pdf" | "docx" | "xlsx" | "pptx") => void;
 }) {
   const parts = useMemo(() => {
     if (!content || typeof content !== "string") return [];
@@ -536,7 +541,31 @@ const MarkdownContent = memo(function MarkdownContent({
               p: ({ children }) => (
                 <p className="mb-3 last:mb-0 leading-relaxed">{children}</p>
               ),
-              a: ({ children, href }) => (
+              a: ({ children, href }) => {
+                const docExtMatch = (href || "").match(/\.(pdf|docx|xlsx|pptx)(?:[?#]|$)/i);
+                if (docExtMatch && onOpenDocumentPanel) {
+                  const ext = docExtMatch[1].toLowerCase() as "pdf" | "docx" | "xlsx" | "pptx";
+                  const label = String(children) || `document.${ext}`;
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => onOpenDocumentPanel(href!, label.replace(/\.[a-z0-9]+$/i, ""), ext)}
+                      className="group my-3 w-full max-w-sm flex items-center gap-3 rounded-xl border border-amber-500/25 bg-gradient-to-br from-zinc-900/80 to-black/60 px-4 py-3.5 text-left transition-all duration-200 hover:border-amber-400/50 hover:shadow-lg hover:shadow-amber-500/10"
+                    >
+                      <div className="h-10 w-10 shrink-0 rounded-lg bg-amber-500/15 border border-amber-500/30 flex items-center justify-center">
+                        <FileText className="w-5 h-5 text-amber-400" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-semibold text-zinc-100 truncate">{label}</div>
+                        <div className="text-xs text-zinc-400 mt-0.5 flex items-center gap-1.5">
+                          <span className="uppercase tracking-wide text-amber-400/80 font-medium">{ext}</span>
+                        </div>
+                      </div>
+                      <ChevronRight className="w-4 h-4 text-zinc-500 group-hover:text-amber-400 group-hover:translate-x-0.5 transition-all shrink-0" />
+                    </button>
+                  );
+                }
+                return (
                 <a
                   href={href}
                   className="text-blue-400 hover:text-blue-300 underline transition-colors"
@@ -545,7 +574,8 @@ const MarkdownContent = memo(function MarkdownContent({
                 >
                   {children}
                 </a>
-              ),
+                );
+              },
               strong: ({ children }) => (
                 <strong className="font-semibold text-amber-300">{children}</strong>
               ),
@@ -710,6 +740,7 @@ const MessageBubble = memo(function MessageBubble({
   isStreaming,
   lang,
   onOpenCodePanel,
+  onOpenDocumentPanel,
 }: any) {
   const [selectedImageIndex, setSelectedImageIndex] = useState<number | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -957,7 +988,7 @@ const hasStoredAudio = !!(
 
               {sanitizedContent ? (
                 <div className="block break-words">
-                  <MarkdownContent content={sanitizedContent} onOpenCodePanel={onOpenCodePanel} />
+                  <MarkdownContent content={sanitizedContent} onOpenCodePanel={onOpenCodePanel} onOpenDocumentPanel={onOpenDocumentPanel} />
                   {isStreaming && (
                     <span className="animate-pulse inline text-amber-400 ml-1">▌</span>
                   )}
@@ -1060,6 +1091,7 @@ function ChatMessagesComponent({
   pendingDetail,
   bottomRef,
   onOpenCodePanel,
+  onOpenDocumentPanel,
 }: Props) {
  
 
@@ -1136,6 +1168,7 @@ function ChatMessagesComponent({
                 handleReport={handleReport}
                 isStreaming={streaming && isLast && msg.role === "assistant"}
                 onOpenCodePanel={onOpenCodePanel}
+                onOpenDocumentPanel={onOpenDocumentPanel}
               />
             </div>
           );
