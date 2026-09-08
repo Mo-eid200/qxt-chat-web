@@ -141,8 +141,41 @@ export function ChatFooter({
   const { upload, progress: uploadProgress, uploading: isUploading } = useUpload(token);
 
   const [error, setError]               = useState<string | null>(null);
-  const [menuOpen, setMenuOpen]         = useState(false);
-  const [emojiOpen, setEmojiOpen]       = useState(false);
+  // ✅ Only one of these two popups (emoji/attach) should ever be
+  // open at once, and both close on outside click — opening one now
+  // closes the other automatically instead of letting them stack.
+  const [menuOpen, _setMenuOpen]         = useState(false);
+  const [emojiOpen, _setEmojiOpen]       = useState(false);
+  const setMenuOpen = useCallback((updater: boolean | ((v: boolean) => boolean)) => {
+    _setMenuOpen((prev) => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      if (next) _setEmojiOpen(false);
+      return next;
+    });
+  }, []);
+  const setEmojiOpen = useCallback((updater: boolean | ((v: boolean) => boolean)) => {
+    _setEmojiOpen((prev) => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      if (next) _setMenuOpen(false);
+      return next;
+    });
+  }, []);
+  const emojiContainerRef = useRef<HTMLDivElement>(null);
+  const attachContainerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!emojiOpen && !menuOpen) return;
+    const handler = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (emojiOpen && emojiContainerRef.current && !emojiContainerRef.current.contains(target)) {
+        _setEmojiOpen(false);
+      }
+      if (menuOpen && attachContainerRef.current && !attachContainerRef.current.contains(target)) {
+        _setMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [emojiOpen, menuOpen]);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [suggestionIdx, setSuggestionIdx] = useState(0);
   const [typedPlaceholder, setTypedPlaceholder] = useState("");
@@ -684,7 +717,7 @@ ${darkMode ? "text-white placeholder:text-white/25" : "text-black placeholder:te
           <div className={`w-px h-4 mx-1 ${darkMode ? "bg-white/[0.08]" : "bg-black/[0.08]"}`} />
 
           {/* ── Emoji ── */}
-          <div className="relative">
+          <div className="relative" ref={emojiContainerRef}>
             <IconBtn
               onClick={() => setEmojiOpen((v) => !v)}
               disabled={isVoiceActive}
@@ -709,7 +742,7 @@ ${darkMode ? "text-white placeholder:text-white/25" : "text-black placeholder:te
           </div>
 
           {/* ── Attach ── */}
-          <div className="relative">
+          <div className="relative" ref={attachContainerRef}>
             <IconBtn
               onClick={() => setMenuOpen((v) => !v)}
               disabled={isVoiceActive}
