@@ -157,9 +157,9 @@ export function ModelSelector({ darkMode }: Props) {
               once, side by side, and we translate the wrapper so the
               transition matches the mobile app's slide-from-right
               pattern instead of an abrupt content swap. */}
-          <div className="relative overflow-hidden">
+          <div className="relative overflow-hidden h-full">
             <div
-              className="flex items-start transition-transform duration-300 ease-out"
+              className="flex items-start h-full transition-transform duration-300 ease-out"
               style={{ transform: view === "all" ? "translateX(-50%)" : "translateX(0%)", width: "200%" }}
             >
               {/* ── Quick picks view ── */}
