@@ -16,6 +16,7 @@ import { useUpload }       from "../../hooks/useUpload";
 import { getStoredToken }  from "../../lib/api/core/qxtClient";
 import hljs from "highlight.js";
 import { FileCode2 } from "lucide-react";
+import { AttachmentMenu } from "./AttachmentMenu";
 import { ModelSelector } from "./ModelSelector";
 import { VoiceOrbOverlay } from "./VoiceOrbOverlay";
 
@@ -484,6 +485,30 @@ const handleSend = useCallback(async () => {
     }
   }, [loading, isVoiceActive, canSend, handleSend, input, onChange]);
 
+  // ✅ Shared upload path for images that arrive as a File object
+  // directly (camera capture, clipboard paste, screenshot) rather
+  // than through the native <input type="file"> picker — mirrors
+  // handleFileSelect's image branch exactly.
+  const handleImageFile = useCallback(async (file: File) => {
+    setMenuOpen(false);
+    const preview = URL.createObjectURL(file);
+    const temp = { url: "", preview, type: file.type.startsWith("video") ? "video" as const : "image" as const };
+    setPendingImages((p) => [...p, temp]);
+
+    const res = await upload(file);
+    if (!res?.url) { setError("Upload failed"); return; }
+
+    setPendingImages((p) =>
+      p.map((img) => {
+        if (img.preview === preview && !img.url) {
+          URL.revokeObjectURL(preview);
+          return { ...img, url: res.url, preview: res.url };
+        }
+        return img;
+      })
+    );
+  }, [setPendingImages, upload]);
+
   const handleFileSelect = useCallback((type: "image" | "file") => {
     const el   = document.createElement("input");
     el.type    = "file";
@@ -753,35 +778,15 @@ ${darkMode ? "text-white placeholder:text-white/25" : "text-black placeholder:te
             </IconBtn>
 
             {menuOpen && (
-              <div className={`
-                absolute bottom-full right-0 mb-2 w-44
-                rounded-xl border overflow-hidden
-                animate-in slide-in-from-bottom-2 fade-in duration-150
-                z-50 ${menuClass}
-              `}>
-                {[
-                  { label: "Image & video", icon: ImageIcon, type: "image" as const },
-                  { label: "File",          icon: FileText,  type: "file"  as const },
-                ].map(({ label, icon: Icon, type }) => (
-                  <button
-                    key={type}
-                    onClick={() => handleFileSelect(type)}
-                    disabled={isUploading || isVoiceActive}
-                    className={`
-                      w-full flex items-center gap-2.5 px-3.5 py-2.5 text-sm
-                      transition-colors duration-100 disabled:opacity-40
-                      ${darkMode
-                        ? "text-white/60 hover:bg-white/[0.05] hover:text-white/85"
-                        : "text-black/60 hover:bg-black/[0.04] hover:text-black/85"
-                      }
-                      ${type === "image" ? `border-b ${darkMode ? "border-white/[0.06]" : "border-black/[0.06]"}` : ""}
-                    `}
-                  >
-                    <Icon className="w-3.5 h-3.5 shrink-0" />
-                    <span>{label}</span>
-                  </button>
-                ))}
-              </div>
+              <AttachmentMenu
+                darkMode={darkMode}
+                menuClass={menuClass}
+                disabled={isUploading || isVoiceActive}
+                onFileSelect={handleFileSelect}
+                onCameraCapture={handleImageFile}
+                onClipboardPaste={handleImageFile}
+                onScreenCapture={handleImageFile}
+              />
             )}
           </div>
 
