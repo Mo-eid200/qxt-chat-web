@@ -55,10 +55,27 @@ export function ModelSelector({ darkMode }: Props) {
   // buried the choice behind unfamiliar family names.
   const [view, setView] = useState<"quick" | "all">("quick");
   const containerRef = useRef<HTMLDivElement>(null);
+  const quickPanelRef = useRef<HTMLDivElement>(null);
+  const allPanelRef = useRef<HTMLDivElement>(null);
+  // ✅ Flexbox's align-items only controls cross-axis alignment, not
+  // the flex container's own height — it always stretches to match
+  // its TALLEST child, so items-start alone couldn't shrink the menu
+  // down to whichever single view is actually showing. Measuring the
+  // active panel's real scrollHeight in JS and applying it directly
+  // is the correct fix.
+  const [menuHeight, setMenuHeight] = useState<number | undefined>(undefined);
 
   useEffect(() => {
     if (!open) setView("quick");
   }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const activeRef = view === "quick" ? quickPanelRef : allPanelRef;
+    if (activeRef.current) {
+      setMenuHeight(Math.min(activeRef.current.scrollHeight, 416)); // 26rem cap
+    }
+  }, [open, view, groupedModels]);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -130,9 +147,11 @@ export function ModelSelector({ darkMode }: Props) {
           className={`
             absolute bottom-full mb-2 right-0 w-[21rem]
             rounded-2xl border overflow-hidden
-            animate-in slide-in-from-bottom-2 fade-in duration-150
+            animate-in slide-in-from-bottom-2 fade-in [animation-duration:150ms]
+            transition-[height] duration-200 ease-out
             z-50 ${menuClass}
           `}
+          style={{ height: menuHeight ? `${menuHeight}px` : undefined }}
         >
           {/* ✅ Sliding two-panel container — both views render at
               once, side by side, and we translate the wrapper so the
@@ -144,7 +163,7 @@ export function ModelSelector({ darkMode }: Props) {
               style={{ transform: view === "all" ? "translateX(-50%)" : "translateX(0%)", width: "200%" }}
             >
               {/* ── Quick picks view ── */}
-              <div className="w-1/2 max-h-[26rem] overflow-y-auto qxt-scroll">
+              <div ref={quickPanelRef} className="w-1/2 overflow-y-auto qxt-scroll">
                 <div className="px-3.5 pt-3 pb-1.5">
                   <span className={`text-[11px] font-semibold uppercase tracking-wide ${darkMode ? "text-white/35" : "text-black/35"}`}>
                     Choose a model
@@ -179,7 +198,7 @@ export function ModelSelector({ darkMode }: Props) {
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-1.5">
-                            <span className={`text-sm font-semibold truncate ${darkMode ? "text-white/90" : "text-black/90"}`}>
+                            <span className={`font-serif text-sm font-semibold truncate ${darkMode ? "text-white/90" : "text-black/90"}`}>
                               {model.public_name}
                             </span>
                             <span className={`text-[10px] font-medium uppercase tracking-wide ${meta.color}`}>
@@ -218,7 +237,7 @@ export function ModelSelector({ darkMode }: Props) {
               </div>
 
               {/* ── All models view ── */}
-              <div className="w-1/2 max-h-[26rem] overflow-y-auto qxt-scroll">
+              <div ref={allPanelRef} className="w-1/2 overflow-y-auto qxt-scroll">
                 <div className="sticky top-0 z-10 flex items-center gap-2 px-3 py-3 backdrop-blur-sm border-b ${menuClass}">
                   <button
                     onClick={() => setView("quick")}
@@ -302,7 +321,7 @@ function ModelRow({
     >
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="font-medium truncate">{model.public_name}</span>
+          <span className="font-serif font-medium truncate">{model.public_name}</span>
           {isRecommended && (
             <span className="inline-flex items-center gap-1 text-[9.5px] font-semibold text-amber-300 bg-amber-500/15 border border-amber-500/30 rounded-full px-1.5 py-0.5">
               <Sparkles className="w-2.5 h-2.5" />
