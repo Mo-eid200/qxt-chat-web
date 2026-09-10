@@ -1,17 +1,15 @@
 "use client";
 
-import React, { useCallback, useRef, useState, useEffect } from "react";
-import { ChevronDown, Check, Sparkles, Gauge, Scale, Brain, Wand2 } from "lucide-react";
+import React, { useCallback, useMemo, useRef, useState, useEffect } from "react";
+import { ChevronDown, ChevronLeft, ChevronRight, Check, Sparkles, Gauge, Scale, Brain, Wand2, MoreHorizontal, X } from "lucide-react";
 import { useModels, type PublicModelItem } from "../../context/ModelsContext";
 
 type Props = {
   darkMode: boolean;
 };
 
-// ✅ Real SVG icons (lucide-react) instead of emoji — emoji render
-// differently across OS/browser font stacks and look inconsistent
-// next to the rest of the app's icon set, which uses lucide-react
-// everywhere else.
+// ✅ Real SVG icons instead of emoji, matching the rest of the app's
+// lucide-react icon set.
 const GROUP_META: Record<
   string,
   { label: string; color: string; iconBg: string; Icon: React.ComponentType<{ className?: string }>; description: string }
@@ -49,14 +47,18 @@ const GROUP_META: Record<
 export function ModelSelector({ darkMode }: Props) {
   const { groupedModels, selected, selectModel, label } = useModels();
   const [open, setOpen] = useState(false);
-  const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
+  // ✅ Two-view pattern mirroring the mobile app: "quick" shows one
+  // representative model per family (fast to scan, one tap to pick),
+  // "all" is a secondary view listing every model grouped by family
+  // for anyone who wants to dig in. Avoids the previous single
+  // always-expanded list, which required two taps per model and
+  // buried the choice behind unfamiliar family names.
+  const [view, setView] = useState<"quick" | "all">("quick");
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!open || expandedGroup) return;
-    const group = groupedModels.find((g) => g.models.some((m) => m.id === selected?.id));
-    setExpandedGroup(group?.groupKey || groupedModels[0]?.groupKey || null);
-  }, [open, groupedModels, selected, expandedGroup]);
+    if (!open) setView("quick");
+  }, [open]);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -74,6 +76,22 @@ export function ModelSelector({ darkMode }: Props) {
       setOpen(false);
     },
     [selectModel]
+  );
+
+  // ✅ One representative model per family for the quick-pick view —
+  // the first model in each group (assumed to be that family's
+  // flagship/default, matching the mobile app's groupModels sort).
+  const quickPicks = useMemo(
+    () =>
+      groupedModels
+        .filter((g) => g.groupKey !== "__ungrouped__")
+        .map((g) => ({ group: g, model: g.models[0] }))
+        .filter((x) => !!x.model),
+    [groupedModels]
+  );
+  const ungroupedModels = useMemo(
+    () => groupedModels.find((g) => g.groupKey === "__ungrouped__")?.models || [],
+    [groupedModels]
   );
 
   const menuClass = darkMode
@@ -101,103 +119,140 @@ export function ModelSelector({ darkMode }: Props) {
       {open && groupedModels.length > 0 && (
         <div
           className={`
-            absolute bottom-full mb-2 right-0 w-[21rem] max-h-[30rem] overflow-y-auto qxt-scroll
+            absolute bottom-full mb-2 right-0 w-[21rem] max-h-[30rem]
             rounded-2xl border overflow-hidden
             animate-in slide-in-from-bottom-2 fade-in duration-150
             z-50 ${menuClass}
           `}
         >
-          {groupedModels.map((group) => {
-            if (group.groupKey === "__ungrouped__") {
-              return group.models.map((model) => (
-                <ModelRow
-                  key={model.id}
-                  model={model}
-                  isSelected={selected?.id === model.id}
-                  darkMode={darkMode}
-                  onSelect={handleSelect}
-                  isRecommended={false}
-                />
-              ));
-            }
-
-            const meta = GROUP_META[group.groupKey] || {
-              label: group.groupKey,
-              color: darkMode ? "text-white/50" : "text-black/50",
-              iconBg: darkMode ? "bg-white/10 border-white/15" : "bg-black/5 border-black/10",
-              Icon: Sparkles,
-              description: "",
-            };
-            const isExpanded = expandedGroup === group.groupKey;
-            const hasSelected = group.models.some((m) => m.id === selected?.id);
-            const GroupIcon = meta.Icon;
-
-            return (
-              <div key={group.groupKey} className="border-b border-white/[0.04] last:border-b-0">
-                <button
-                  onClick={() => setExpandedGroup(isExpanded ? null : group.groupKey)}
-                  className={`
-                    w-full flex items-center justify-between px-3.5 py-3
-                    transition-colors duration-100
-                    ${darkMode ? "hover:bg-white/[0.03]" : "hover:bg-black/[0.02]"}
-                  `}
-                >
-                  <div className="flex items-center gap-2.5">
-                    <div className={`h-7 w-7 shrink-0 rounded-lg border flex items-center justify-center ${meta.iconBg}`}>
-                      <GroupIcon className={`w-3.5 h-3.5 ${meta.color}`} />
-                    </div>
-                    <div className="text-left">
-                      <div className="flex items-center gap-1.5">
-                        <span className={`text-[12.5px] font-semibold ${meta.color}`}>
-                          {meta.label}
-                        </span>
-                        {hasSelected && !isExpanded && (
-                          <Check className={`w-3 h-3 ${meta.color}`} />
-                        )}
-                      </div>
-                      {meta.description && (
-                        <div className={`text-[10.5px] mt-0.5 ${darkMode ? "text-white/30" : "text-black/30"}`}>
-                          {meta.description}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                  <ChevronDown
-                    className={`w-3.5 h-3.5 shrink-0 transition-transform duration-200 ${
-                      isExpanded ? "rotate-180" : ""
-                    } ${darkMode ? "text-white/30" : "text-black/30"}`}
-                  />
-                </button>
-
-                <div
-                  className="grid transition-all duration-300 ease-in-out"
-                  style={{ gridTemplateRows: isExpanded ? "1fr" : "0fr" }}
-                >
-                  <div className="overflow-hidden">
-                    <div className="relative pb-1.5">
-                      {/* خط عمودي رفيع يربط الموديلات الفرعية بصريًا بمجموعتها */}
-                      <div
-                        className={`absolute left-[24px] top-0 bottom-2 w-px ${
-                          darkMode ? "bg-white/[0.08]" : "bg-black/[0.08]"
-                        }`}
-                      />
-                      {group.models.map((model, idx) => (
-                        <ModelRow
-                          key={model.id}
-                          model={model}
-                          isSelected={selected?.id === model.id}
-                          darkMode={darkMode}
-                          onSelect={handleSelect}
-                          accentColor={meta.color}
-                          isRecommended={idx === 0}
-                        />
-                      ))}
-                    </div>
-                  </div>
+          {/* ✅ Sliding two-panel container — both views render at
+              once, side by side, and we translate the wrapper so the
+              transition matches the mobile app's slide-from-right
+              pattern instead of an abrupt content swap. */}
+          <div className="relative overflow-hidden">
+            <div
+              className="flex transition-transform duration-300 ease-out"
+              style={{ transform: view === "all" ? "translateX(-50%)" : "translateX(0%)", width: "200%" }}
+            >
+              {/* ── Quick picks view ── */}
+              <div className="w-1/2 max-h-[30rem] overflow-y-auto qxt-scroll">
+                <div className="px-3.5 pt-3 pb-1.5">
+                  <span className={`text-[11px] font-semibold uppercase tracking-wide ${darkMode ? "text-white/35" : "text-black/35"}`}>
+                    Choose a model
+                  </span>
                 </div>
+                <div className="px-2 pb-1.5 space-y-0.5">
+                  {quickPicks.map(({ group, model }) => {
+                    const meta = GROUP_META[group.groupKey] || {
+                      label: group.groupKey,
+                      color: darkMode ? "text-white/50" : "text-black/50",
+                      iconBg: darkMode ? "bg-white/10 border-white/15" : "bg-black/5 border-black/10",
+                      Icon: Sparkles,
+                      description: "",
+                    };
+                    const GroupIcon = meta.Icon;
+                    const isSelected = selected?.id === model.id;
+                    return (
+                      <button
+                        key={model.id}
+                        onClick={() => handleSelect(model)}
+                        className={`
+                          w-full flex items-center gap-2.5 px-2.5 py-2.5 rounded-xl text-left
+                          transition-colors duration-100
+                          ${isSelected
+                            ? darkMode ? "bg-white/[0.07]" : "bg-black/[0.05]"
+                            : darkMode ? "hover:bg-white/[0.04]" : "hover:bg-black/[0.03]"
+                          }
+                        `}
+                      >
+                        <div className={`h-8 w-8 shrink-0 rounded-lg border flex items-center justify-center ${meta.iconBg}`}>
+                          <GroupIcon className={`w-4 h-4 ${meta.color}`} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className={`text-sm font-semibold truncate ${darkMode ? "text-white/90" : "text-black/90"}`}>
+                            {meta.label}
+                          </div>
+                          {meta.description && (
+                            <div className={`text-[11px] truncate ${darkMode ? "text-white/35" : "text-black/35"}`}>
+                              {meta.description}
+                            </div>
+                          )}
+                        </div>
+                        {isSelected && <Check className="w-4 h-4 shrink-0 text-blue-400" />}
+                      </button>
+                    );
+                  })}
+                  {ungroupedModels.map((model) => (
+                    <ModelRow key={model.id} model={model} isSelected={selected?.id === model.id} darkMode={darkMode} onSelect={handleSelect} />
+                  ))}
+                </div>
+
+                <button
+                  onClick={() => setView("all")}
+                  className={`
+                    w-full flex items-center gap-2.5 mx-2 mb-2 px-2.5 py-2.5 rounded-xl text-left border-t
+                    ${darkMode ? "border-white/[0.06] hover:bg-white/[0.04]" : "border-black/[0.06] hover:bg-black/[0.03]"}
+                  `}
+                  style={{ width: "calc(100% - 1rem)" }}
+                >
+                  <div className={`h-8 w-8 shrink-0 rounded-lg border flex items-center justify-center ${darkMode ? "bg-white/[0.06] border-white/10" : "bg-black/[0.04] border-black/10"}`}>
+                    <MoreHorizontal className={`w-4 h-4 ${darkMode ? "text-white/50" : "text-black/50"}`} />
+                  </div>
+                  <span className={`flex-1 text-sm font-medium ${darkMode ? "text-white/80" : "text-black/80"}`}>
+                    More models
+                  </span>
+                  <ChevronRight className={`w-4 h-4 ${darkMode ? "text-white/30" : "text-black/30"}`} />
+                </button>
               </div>
-            );
-          })}
+
+              {/* ── All models view ── */}
+              <div className="w-1/2 max-h-[30rem] overflow-y-auto qxt-scroll">
+                <div className="sticky top-0 z-10 flex items-center gap-2 px-3 py-3 backdrop-blur-sm border-b ${menuClass}">
+                  <button
+                    onClick={() => setView("quick")}
+                    className={`h-7 w-7 rounded-lg flex items-center justify-center ${darkMode ? "hover:bg-white/[0.08] text-white/60" : "hover:bg-black/[0.06] text-black/60"}`}
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  <span className={`text-[13px] font-semibold ${darkMode ? "text-white/90" : "text-black/90"}`}>
+                    All models
+                  </span>
+                </div>
+
+                {groupedModels.map((group) => {
+                  if (group.groupKey === "__ungrouped__") return null;
+                  const meta = GROUP_META[group.groupKey] || {
+                    label: group.groupKey,
+                    color: darkMode ? "text-white/50" : "text-black/50",
+                    iconBg: darkMode ? "bg-white/10 border-white/15" : "bg-black/5 border-black/10",
+                    Icon: Sparkles,
+                    description: "",
+                  };
+                  return (
+                    <div key={group.groupKey} className="px-2 pt-2.5">
+                      <span className={`px-1.5 text-[10.5px] font-semibold uppercase tracking-wide ${meta.color}`}>
+                        {meta.label}
+                      </span>
+                      <div className="mt-1 space-y-0.5 pb-1">
+                        {group.models.map((model, idx) => (
+                          <ModelRow
+                            key={model.id}
+                            model={model}
+                            isSelected={selected?.id === model.id}
+                            darkMode={darkMode}
+                            onSelect={handleSelect}
+                            accentColor={meta.color}
+                            isRecommended={idx === 0}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+                <div className="h-1.5" />
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -224,7 +279,7 @@ function ModelRow({
     <button
       onClick={() => onSelect(model)}
       className={`
-        w-full flex items-center gap-2.5 pl-10 pr-3.5 py-2.5 text-sm text-left relative
+        w-full flex items-center gap-2.5 px-2.5 py-2.5 rounded-xl text-sm text-left relative
         transition-colors duration-100
         ${isSelected
           ? darkMode ? "bg-white/[0.06] text-white" : "bg-black/[0.05] text-black"
