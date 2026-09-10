@@ -81,12 +81,21 @@ export function ModelSelector({ darkMode }: Props) {
   // ✅ One representative model per family for the quick-pick view —
   // the first model in each group (assumed to be that family's
   // flagship/default, matching the mobile app's groupModels sort).
+  // ✅ "nova" (Aurora's family) leads the list since it's the
+  // default/flagship model — the rest keep the backend's original
+  // group order after it.
+  const QUICK_PICK_ORDER = ["nova", "quantum", "core", "nexus"];
   const quickPicks = useMemo(
     () =>
       groupedModels
         .filter((g) => g.groupKey !== "__ungrouped__")
         .map((g) => ({ group: g, model: g.models[0] }))
-        .filter((x) => !!x.model),
+        .filter((x) => !!x.model)
+        .sort((a, b) => {
+          const ai = QUICK_PICK_ORDER.indexOf(a.group.groupKey);
+          const bi = QUICK_PICK_ORDER.indexOf(b.group.groupKey);
+          return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+        }),
     [groupedModels]
   );
   const ungroupedModels = useMemo(
@@ -119,7 +128,7 @@ export function ModelSelector({ darkMode }: Props) {
       {open && groupedModels.length > 0 && (
         <div
           className={`
-            absolute bottom-full mb-2 right-0 w-[21rem] max-h-[30rem]
+            absolute bottom-full mb-2 right-0 w-[21rem]
             rounded-2xl border overflow-hidden
             animate-in slide-in-from-bottom-2 fade-in duration-150
             z-50 ${menuClass}
@@ -135,7 +144,7 @@ export function ModelSelector({ darkMode }: Props) {
               style={{ transform: view === "all" ? "translateX(-50%)" : "translateX(0%)", width: "200%" }}
             >
               {/* ── Quick picks view ── */}
-              <div className="w-1/2 max-h-[30rem] overflow-y-auto qxt-scroll">
+              <div className="w-1/2 max-h-[26rem] overflow-y-auto qxt-scroll">
                 <div className="px-3.5 pt-3 pb-1.5">
                   <span className={`text-[11px] font-semibold uppercase tracking-wide ${darkMode ? "text-white/35" : "text-black/35"}`}>
                     Choose a model
@@ -209,7 +218,7 @@ export function ModelSelector({ darkMode }: Props) {
               </div>
 
               {/* ── All models view ── */}
-              <div className="w-1/2 max-h-[30rem] overflow-y-auto qxt-scroll">
+              <div className="w-1/2 max-h-[26rem] overflow-y-auto qxt-scroll">
                 <div className="sticky top-0 z-10 flex items-center gap-2 px-3 py-3 backdrop-blur-sm border-b ${menuClass}">
                   <button
                     onClick={() => setView("quick")}
