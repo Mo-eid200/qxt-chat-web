@@ -169,14 +169,17 @@ export function ModelSelector({ darkMode }: Props) {
                           <GroupIcon className={`w-4 h-4 ${meta.color}`} />
                         </div>
                         <div className="flex-1 min-w-0">
-                          <div className={`text-sm font-semibold truncate ${darkMode ? "text-white/90" : "text-black/90"}`}>
-                            {meta.label}
+                          <div className="flex items-center gap-1.5">
+                            <span className={`text-sm font-semibold truncate ${darkMode ? "text-white/90" : "text-black/90"}`}>
+                              {model.public_name}
+                            </span>
+                            <span className={`text-[10px] font-medium uppercase tracking-wide ${meta.color}`}>
+                              {meta.label}
+                            </span>
                           </div>
-                          {meta.description && (
-                            <div className={`text-[11px] truncate ${darkMode ? "text-white/35" : "text-black/35"}`}>
-                              {meta.description}
-                            </div>
-                          )}
+                          <div className={`text-[11px] truncate ${darkMode ? "text-white/35" : "text-black/35"}`}>
+                            {model.description || meta.description}
+                          </div>
                         </div>
                         {isSelected && <Check className="w-4 h-4 shrink-0 text-blue-400" />}
                       </button>
