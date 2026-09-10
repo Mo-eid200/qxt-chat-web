@@ -155,7 +155,7 @@ export function AttachmentMenu({
         className={`
           absolute bottom-full right-0 mb-2 w-64
           rounded-2xl border overflow-hidden
-          animate-in slide-in-from-bottom-2 fade-in duration-150
+          animate-in zoom-in-95 fade-in origin-bottom-right duration-[180ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)]
           z-50 ${menuClass}
         `}
       >

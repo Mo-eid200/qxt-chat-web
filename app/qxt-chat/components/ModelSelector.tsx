@@ -147,7 +147,7 @@ export function ModelSelector({ darkMode }: Props) {
           className={`
             absolute bottom-full mb-2 right-0 w-[21rem]
             rounded-2xl border overflow-hidden
-            animate-in slide-in-from-bottom-2 fade-in [animation-duration:150ms]
+            animate-in zoom-in-95 fade-in origin-bottom-right [animation-duration:180ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)]
             transition-[height] duration-200 ease-out
             z-50 ${menuClass}
           `}
