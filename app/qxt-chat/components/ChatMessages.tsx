@@ -996,29 +996,32 @@ const hasStoredAudio = !!(
                   the model reads, not something it generated. */}
               {Array.isArray((msg as any).documents) && (msg as any).documents.length > 0 && (
                 <div className="flex flex-wrap gap-2">
-                  {(msg as any).documents.map((doc: any, i: number) => (
-                    <a
-                      key={i}
-                      href={doc.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-2.5 pl-3 pr-4 py-2.5 rounded-xl border border-white/15 bg-black/30 hover:bg-black/50 hover:border-white/25 transition-all duration-200 max-w-xs"
-                    >
-                      <div className="h-8 w-8 shrink-0 rounded-lg bg-white/10 border border-white/15 flex items-center justify-center">
-                        <FileCode2 className="w-4 h-4 text-zinc-300" />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="text-sm font-medium text-zinc-100 truncate">
-                          {doc.name || "Document"}
+                  {(msg as any).documents.map((doc: any, i: number) => {
+                    const docExtMatch = (doc.name || doc.url || "").match(/\.(pdf|docx|xlsx|pptx)(?:[?#]|$)/i);
+                    const ext = (docExtMatch ? docExtMatch[1].toLowerCase() : "pdf") as "pdf" | "docx" | "xlsx" | "pptx";
+                    return (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => onOpenDocumentPanel?.(doc.url, (doc.name || "Document").replace(/\.[a-z0-9]+$/i, ""), ext)}
+                        className="flex items-center gap-2.5 pl-3 pr-4 py-2.5 rounded-xl border border-amber-500/25 bg-gradient-to-br from-zinc-900/80 to-black/60 hover:border-amber-400/50 hover:shadow-lg hover:shadow-amber-500/10 transition-all duration-200 max-w-xs text-left"
+                      >
+                        <div className="h-8 w-8 shrink-0 rounded-lg bg-amber-500/15 border border-amber-500/30 flex items-center justify-center">
+                          <FileText className="w-4 h-4 text-amber-400" />
                         </div>
-                        {doc.size != null && (
-                          <div className="text-[11px] text-zinc-400">
-                            {(doc.size / 1024).toFixed(0)} KB
+                        <div className="min-w-0">
+                          <div className="text-sm font-medium text-zinc-100 truncate">
+                            {doc.name || "Document"}
                           </div>
-                        )}
-                      </div>
-                    </a>
-                  ))}
+                          {doc.size != null && (
+                            <div className="text-[11px] text-amber-400/70 uppercase tracking-wide">
+                              {ext} - {(doc.size / 1024).toFixed(0)} KB
+                            </div>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
               )}
 
