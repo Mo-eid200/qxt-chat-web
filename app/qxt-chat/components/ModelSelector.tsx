@@ -163,7 +163,7 @@ export function ModelSelector({ darkMode }: Props) {
               style={{ transform: view === "all" ? "translateX(-50%)" : "translateX(0%)", width: "200%" }}
             >
               {/* ── Quick picks view ── */}
-              <div ref={quickPanelRef} className="w-1/2 overflow-y-auto qxt-scroll">
+              <div ref={quickPanelRef} className="w-1/2 h-full overflow-y-auto qxt-scroll">
                 <div className="px-3.5 pt-3 pb-1.5">
                   <span className={`text-[11px] font-semibold uppercase tracking-wide ${darkMode ? "text-white/35" : "text-black/35"}`}>
                     Choose a model
@@ -237,7 +237,7 @@ export function ModelSelector({ darkMode }: Props) {
               </div>
 
               {/* ── All models view ── */}
-              <div ref={allPanelRef} className="w-1/2 overflow-y-auto qxt-scroll">
+              <div ref={allPanelRef} className="w-1/2 h-full overflow-y-auto qxt-scroll">
                 <div className="sticky top-0 z-10 flex items-center gap-2 px-3 py-3 backdrop-blur-sm border-b ${menuClass}">
                   <button
                     onClick={() => setView("quick")}
