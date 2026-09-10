@@ -140,7 +140,7 @@ export function ModelSelector({ darkMode }: Props) {
               pattern instead of an abrupt content swap. */}
           <div className="relative overflow-hidden">
             <div
-              className="flex transition-transform duration-300 ease-out"
+              className="flex items-start transition-transform duration-300 ease-out"
               style={{ transform: view === "all" ? "translateX(-50%)" : "translateX(0%)", width: "200%" }}
             >
               {/* ── Quick picks view ── */}
