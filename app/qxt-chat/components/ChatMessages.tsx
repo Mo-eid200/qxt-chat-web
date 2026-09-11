@@ -45,6 +45,8 @@ type Props = {
   darkMode: boolean;
   onOpenCodePanel?: (code: string, language: string) => void;
   onOpenDocumentPanel?: (url: string, title: string, format: "pdf" | "docx" | "xlsx" | "pptx") => void;
+  onUpgradeClick?: () => void;
+  onAddOnsClick?: () => void;
 
   messageDir: "rtl" | "ltr";
   messageTextAlign: "text-right" | "text-left";
@@ -741,6 +743,8 @@ const MessageBubble = memo(function MessageBubble({
   lang,
   onOpenCodePanel,
   onOpenDocumentPanel,
+  onUpgradeClick,
+  onAddOnsClick,
 }: any) {
   const [selectedImageIndex, setSelectedImageIndex] = useState<number | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -1031,6 +1035,31 @@ const hasStoredAudio = !!(
                   {isStreaming && (
                     <span className="animate-pulse inline text-amber-400 ml-1">▌</span>
                   )}
+                  {/* ✅ Upgrade/Add-ons buttons — mirrors UsageBanner's
+                      exhausted-tier buttons (amber theme, font-serif),
+                      rendered inside the message itself when the model
+                      hit WALLET_EXHAUSTED (see QXTChatClient.tsx's
+                      catch block, which sets kind="upgrade"). */}
+                  {msg.kind === "upgrade" && (onUpgradeClick || onAddOnsClick) && (
+                    <div className="flex items-center gap-2 mt-3">
+                      {onUpgradeClick && (
+                        <button
+                          onClick={onUpgradeClick}
+                          className="inline-flex items-center gap-1.5 text-[13px] font-serif font-semibold px-3 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 transition-colors duration-150"
+                        >
+                          Upgrade Plan
+                        </button>
+                      )}
+                      {onAddOnsClick && (
+                        <button
+                          onClick={onAddOnsClick}
+                          className="inline-flex items-center gap-1.5 text-[13px] font-serif font-semibold px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 border border-white/15 text-zinc-200 transition-colors duration-150"
+                        >
+                          Add-ons
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               ) : images.length === 0 &&
                 videos.length === 0 &&
@@ -1131,6 +1160,8 @@ function ChatMessagesComponent({
   bottomRef,
   onOpenCodePanel,
   onOpenDocumentPanel,
+  onUpgradeClick,
+  onAddOnsClick,
 }: Props) {
  
 
@@ -1208,6 +1239,8 @@ function ChatMessagesComponent({
                 isStreaming={streaming && isLast && msg.role === "assistant"}
                 onOpenCodePanel={onOpenCodePanel}
                 onOpenDocumentPanel={onOpenDocumentPanel}
+                onUpgradeClick={onUpgradeClick}
+                onAddOnsClick={onAddOnsClick}
               />
             </div>
           );

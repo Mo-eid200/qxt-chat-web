@@ -1044,6 +1044,8 @@ onToggleUnread={() => {
         bottomRef={bottomRef}
         onOpenCodePanel={handleOpenCodePanel}
         onOpenDocumentPanel={handleOpenDocumentPanel}
+        onUpgradeClick={() => setUpgradeOpen(true)}
+        onAddOnsClick={() => alert("Add-ons are coming soon!")}
       />
     </div>
   )}
