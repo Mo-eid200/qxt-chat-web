@@ -198,7 +198,11 @@ export function WorkspaceUpgradeModal({
         onClick={onClose}
         className="fixed inset-0 z-[9999] overflow-y-auto bg-black/80 backdrop-blur-xl p-4"
       >
-        <div className="relative min-h-[360px] flex items-center justify-center">
+        {/* ✅ min-h-full (not a fixed min-h-[360px]) so this
+            container spans the ENTIRE scrollable viewport height —
+            same fix as PersonalUpgradeModal.tsx, see that file for
+            the full explanation. */}
+        <div className="relative min-h-full flex items-center justify-center">
           <motion.div
             initial={{ opacity: 0, scale: 0.96, y: 18 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
