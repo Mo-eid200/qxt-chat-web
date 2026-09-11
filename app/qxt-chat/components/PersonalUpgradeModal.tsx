@@ -151,7 +151,13 @@ export function PersonalUpgradeModal({ open, onClose, onUpgrade, currentPlanId }
         onClick={onClose}
         className="fixed inset-0 z-[9999] overflow-y-auto bg-black/80 backdrop-blur-xl p-4"
       >
-        <div className="relative min-h-[360px] flex items-center justify-center">
+        {/* ✅ min-h-full (not a fixed min-h-[360px]) so this
+            container spans the ENTIRE scrollable viewport height —
+            the old fixed value meant items-center only centered
+            within a 360px box, not the actual (much taller) content,
+            which is why the modal appeared pinned near the top
+            instead of vertically centered. */}
+        <div className="relative min-h-full flex items-center justify-center">
           <motion.div
             initial={{ opacity: 0, scale: 0.96, y: 18 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}

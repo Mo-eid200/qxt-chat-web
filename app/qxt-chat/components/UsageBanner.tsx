@@ -90,7 +90,16 @@ export function UsageBanner({ percentageUsed, usageTier, darkMode, userId, onUpg
   }, [usageTier, userId]);
 
   const handleDismiss = () => {
-    writeDismissedTier(userId, usageTier);
+    // ✅ "exhausted" (100%) is intentionally NOT persisted to
+    // localStorage — dismissing it only hides it for the rest of
+    // THIS session (visible=false below still applies immediately),
+    // but the next fresh load (refresh, or logging out and back in)
+    // will show it again, since nothing was ever written to
+    // remember the dismissal. Every other tier still persists
+    // normally via writeDismissedTier.
+    if (usageTier !== "exhausted") {
+      writeDismissedTier(userId, usageTier);
+    }
     setClosing(true);
     closeTimer.current = setTimeout(() => {
       setVisible(false);
