@@ -29,18 +29,48 @@ const TIER_STYLES: Record<string, { text: string; bar: string; dot: string }> = 
   exhausted: { text: "text-red-200",    bar: "from-red-600 to-red-700",         dot: "bg-red-500" },
 };
 
+const DISMISS_STORAGE_KEY = "qxt_usage_banner_dismissed_tier";
+
 export function UsageBanner({ percentageUsed, usageTier, darkMode, onUpgradeClick, onAddOnsClick }: Props) {
-  // ✅ Dismissal is tier-scoped, not permanent — closing the banner
-  // at "moderate" (70%) still lets it reappear once usage climbs
-  // into "elevated" (80%), since that's a materially more urgent
-  // state the user should see again.
-  const [dismissedTier, setDismissedTier] = useState<string | null>(null);
+  // ✅ Dismissal is tier-scoped AND persisted across refreshes via
+  // localStorage — a user who closes the banner at "moderate" (70%)
+  // shouldn't see it pop back up on every page reload while still
+  // at that same tier (that'd feel like the dismiss button doesn't
+  // work). It still reappears once usage climbs into a HIGHER tier
+  // (e.g. "elevated" 80%), since that's new, more urgent information.
+  const [dismissedTier, setDismissedTierState] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Read the persisted dismissal once on mount (client-only, since
+    // localStorage isn't available during SSR).
+    try {
+      const stored = window.localStorage.getItem(DISMISS_STORAGE_KEY);
+      if (stored) setDismissedTierState(stored);
+    } catch {
+      // localStorage unavailable (private browsing, etc.) — banner
+      // just won't persist dismissal across reloads, no crash.
+    }
+  }, []);
+
+  const setDismissedTier = (tier: string) => {
+    setDismissedTierState(tier);
+    try {
+      window.localStorage.setItem(DISMISS_STORAGE_KEY, tier);
+    } catch {
+      // ignore — see above
+    }
+  };
 
   useEffect(() => {
     // Any tier change (up OR down) clears a stale dismissal — e.g. a
     // renewal resetting usage back down should also reset dismissal.
     if (dismissedTier && dismissedTier !== usageTier) {
-      setDismissedTier(null);
+      setDismissedTierState(null);
+      try {
+        window.localStorage.removeItem(DISMISS_STORAGE_KEY);
+      } catch {
+        // ignore
+      }
     }
   }, [usageTier, dismissedTier]);
 
