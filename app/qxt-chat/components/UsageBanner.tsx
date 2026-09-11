@@ -102,6 +102,7 @@ export function UsageBanner({ percentageUsed, usageTier, darkMode, onUpgradeClic
   }, [shouldShow, isMounted, isClosing]);
 
   const handleDismiss = () => {
+    console.log("[UsageBanner] handleDismiss called, usageTier:", usageTier, "shouldShow before:", shouldShow);
     setDismissedTier(usageTier);
   };
 
