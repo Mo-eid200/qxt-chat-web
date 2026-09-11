@@ -134,34 +134,39 @@ export function UsageBanner({ percentageUsed, usageTier, darkMode, userId, onUpg
           <span className={`font-serif text-[13px] font-medium ${style.text}`}>
             Q-Power: {percentageUsed}% used
           </span>
-
-          {isExhausted && (
-            <div className="flex items-center gap-2 ml-1">
-              <button
-                onClick={onUpgradeClick}
-                className={`
-                  inline-flex items-center gap-1 text-[12px] font-serif font-semibold
-                  px-2.5 py-1 rounded-lg transition-colors duration-150
-                  ${darkMode ? "bg-white/10 hover:bg-white/15 text-white" : "bg-black/10 hover:bg-black/15 text-black"}
-                `}
-              >
-                <ArrowUpCircle className="w-3 h-3" />
-                Upgrade Plan
-              </button>
-              <button
-                onClick={onAddOnsClick}
-                className={`
-                  inline-flex items-center gap-1 text-[12px] font-serif font-semibold
-                  px-2.5 py-1 rounded-lg transition-colors duration-150
-                  ${darkMode ? "bg-white/10 hover:bg-white/15 text-white" : "bg-black/10 hover:bg-black/15 text-black"}
-                `}
-              >
-                <PlusCircle className="w-3 h-3" />
-                Add-ons
-              </button>
-            </div>
-          )}
         </div>
+
+        {/* ✅ Buttons moved out of the text's flex-1 div and into
+            their own sibling — previously they sat right after the
+            percentage text and only pushed as far right as the text
+            was long, instead of anchoring to the banner's far right
+            edge. */}
+        {isExhausted && (
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={onUpgradeClick}
+              className={`
+                inline-flex items-center gap-1 text-[12px] font-serif font-semibold
+                px-2.5 py-1 rounded-lg transition-colors duration-150
+                ${darkMode ? "bg-white/10 hover:bg-white/15 text-white" : "bg-black/10 hover:bg-black/15 text-black"}
+              `}
+            >
+              <ArrowUpCircle className="w-3 h-3" />
+              Upgrade Plan
+            </button>
+            <button
+              onClick={onAddOnsClick}
+              className={`
+                inline-flex items-center gap-1 text-[12px] font-serif font-semibold
+                px-2.5 py-1 rounded-lg transition-colors duration-150
+                ${darkMode ? "bg-white/10 hover:bg-white/15 text-white" : "bg-black/10 hover:bg-black/15 text-black"}
+              `}
+            >
+              <PlusCircle className="w-3 h-3" />
+              Add-ons
+            </button>
+          </div>
+        )}
 
         <button
           onClick={handleDismiss}
