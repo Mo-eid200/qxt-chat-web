@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { X, Zap, ArrowUpCircle, PlusCircle } from "lucide-react";
 
 type Props = {
@@ -13,11 +13,6 @@ type Props = {
 
 // ✅ Same 8-tier ladder as the backend's _USAGE_TIERS (bootstrap.py) —
 // keep this list in sync if thresholds ever change there.
-const TIER_ORDER = ["normal", "notice", "low", "moderate", "elevated", "high", "critical", "severe", "exhausted"];
-
-// ✅ Gradient colors progressing from a calm blue/gray at low usage
-// to a warning red at exhaustion — smooth, modern gradient rather
-// than a flat single color per tier.
 const TIER_STYLES: Record<string, { text: string; bar: string; dot: string }> = {
   notice:    { text: "text-blue-300",   bar: "from-blue-500 to-cyan-400",       dot: "bg-blue-400" },
   low:       { text: "text-cyan-300",   bar: "from-cyan-500 to-emerald-400",    dot: "bg-cyan-400" },
@@ -31,89 +26,78 @@ const TIER_STYLES: Record<string, { text: string; bar: string; dot: string }> = 
 
 const DISMISS_STORAGE_KEY = "qxt_usage_banner_dismissed_tier";
 
+// ✅ Single source of truth, matching how large platforms (Claude,
+// ChatGPT, Notion) handle "dismiss until state changes" banners:
+// one boolean ref for whether THIS SPECIFIC tier was dismissed,
+// read/written directly at the moment of the click — no separate
+// effects racing to reconcile derived state against each other.
+function readDismissedTier(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage.getItem(DISMISS_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeDismissedTier(tier: string | null) {
+  try {
+    if (tier) window.localStorage.setItem(DISMISS_STORAGE_KEY, tier);
+    else window.localStorage.removeItem(DISMISS_STORAGE_KEY);
+  } catch {
+    // ignore — private browsing etc.
+  }
+}
+
 export function UsageBanner({ percentageUsed, usageTier, darkMode, onUpgradeClick, onAddOnsClick }: Props) {
-  // ✅ Dismissal is tier-scoped AND persisted across refreshes via
-  // localStorage — a user who closes the banner at "moderate" (70%)
-  // shouldn't see it pop back up on every page reload while still
-  // at that same tier (that'd feel like the dismiss button doesn't
-  // work). It still reappears once usage climbs into a HIGHER tier
-  // (e.g. "elevated" 80%), since that's new, more urgent information.
-  const [dismissedTier, setDismissedTierState] = useState<string | null>(null);
-
-  useEffect(() => {
-    // Read the persisted dismissal once on mount (client-only, since
-    // localStorage isn't available during SSR).
-    try {
-      const stored = window.localStorage.getItem(DISMISS_STORAGE_KEY);
-      if (stored) setDismissedTierState(stored);
-    } catch {
-      // localStorage unavailable (private browsing, etc.) — banner
-      // just won't persist dismissal across reloads, no crash.
-    }
-  }, []);
-
-  const setDismissedTier = (tier: string) => {
-    setDismissedTierState(tier);
-    try {
-      window.localStorage.setItem(DISMISS_STORAGE_KEY, tier);
-    } catch {
-      // ignore — see above
-    }
-  };
-
-  useEffect(() => {
-    // Any tier change (up OR down) clears a stale dismissal — e.g. a
-    // renewal resetting usage back down should also reset dismissal.
-    if (dismissedTier && dismissedTier !== usageTier) {
-      setDismissedTierState(null);
-      try {
-        window.localStorage.removeItem(DISMISS_STORAGE_KEY);
-      } catch {
-        // ignore
-      }
-    }
-  }, [usageTier, dismissedTier]);
-
-  const shouldShow = usageTier !== "normal" && dismissedTier !== usageTier;
-  const style = TIER_STYLES[usageTier] || TIER_STYLES.notice;
   const isExhausted = usageTier === "exhausted";
+  const style = TIER_STYLES[usageTier] || TIER_STYLES.notice;
 
-  // ✅ Exit animation: tailwindcss-animate's animate-in/fade-in only
-  // handles the MOUNT transition — React unmounts the element
-  // immediately on the next render with no chance for any CSS
-  // transition to play. isClosing keeps the element mounted for one
-  // more animation duration, playing a zoom-out/fade-out, then the
-  // element is actually removed.
-  const [isClosing, setIsClosing] = useState(false);
-  const [isMounted, setIsMounted] = useState(shouldShow);
+  // "visible" is the single flag driving both render (mount/unmount)
+  // and the animation class — no other state duplicates or races
+  // against it.
+  const [visible, setVisible] = useState(false);
+  const [closing, setClosing] = useState(false);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hasHydrated = useRef(false);
 
+  // Recompute visibility whenever the tier changes: a tier the user
+  // hasn't dismissed (or a NEW, different tier than whatever they
+  // last dismissed) should show; the exact tier they dismissed stays
+  // hidden. This one check replaces the previous two interacting
+  // effects.
   useEffect(() => {
-    if (shouldShow && !isMounted) {
-      setIsMounted(true);
-      setIsClosing(false);
-    } else if (!shouldShow && isMounted && !isClosing) {
-      setIsClosing(true);
-      const timer = setTimeout(() => {
-        setIsMounted(false);
-        setIsClosing(false);
-      }, 250);
-      return () => clearTimeout(timer);
+    hasHydrated.current = true;
+    const dismissed = readDismissedTier();
+    const shouldBeVisible = usageTier !== "normal" && dismissed !== usageTier;
+
+    if (closeTimer.current) {
+      clearTimeout(closeTimer.current);
+      closeTimer.current = null;
     }
-  }, [shouldShow, isMounted, isClosing]);
+    setClosing(false);
+    setVisible(shouldBeVisible);
+  }, [usageTier]);
 
   const handleDismiss = () => {
-    console.log("[UsageBanner] handleDismiss called, usageTier:", usageTier, "shouldShow before:", shouldShow);
-    setDismissedTier(usageTier);
+    writeDismissedTier(usageTier);
+    setClosing(true);
+    closeTimer.current = setTimeout(() => {
+      setVisible(false);
+      setClosing(false);
+    }, 250);
   };
 
-  if (!isMounted) return null;
+  // Nothing to show before hydration (avoids an SSR/client mismatch
+  // flash) or once fully hidden.
+  if (!hasHydrated.current || !visible) return null;
 
   return (
     <div
       className={`
         relative w-full overflow-hidden rounded-xl border mb-2
         [animation-timing-function:cubic-bezier(0.16,1,0.3,1)]
-        ${isClosing
+        ${closing
           ? "animate-out zoom-out-95 fade-out slide-out-to-bottom-1 [animation-duration:250ms]"
           : "animate-in zoom-in-95 fade-in slide-in-from-bottom-1 [animation-duration:400ms]"
         }
