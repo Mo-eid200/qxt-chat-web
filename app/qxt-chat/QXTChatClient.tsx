@@ -533,6 +533,20 @@ useChatHydration({
 
         if (!response.ok) {
           const raw = await response.clone().text();
+          // ✅ Detect the WALLET_EXHAUSTED error shape specifically,
+          // so the catch block below can render a friendly upgrade
+          // prompt instead of the raw JSON error text.
+          try {
+            const parsed = JSON.parse(raw);
+            if (parsed?.error?.code === "WALLET_EXHAUSTED") {
+              const err: any = new Error(parsed.error.message || "Wallet exhausted");
+              err.code = "WALLET_EXHAUSTED";
+              throw err;
+            }
+          } catch (parseErr: any) {
+            if (parseErr?.code === "WALLET_EXHAUSTED") throw parseErr;
+            // not JSON or not the shape we expected — fall through
+          }
           throw new Error(raw || `API error ${response.status}`);
         }
 
@@ -742,14 +756,18 @@ useChatHydration({
         stopPendingStage();
       } catch (error: any) {
         if (error?.name !== "AbortError") {
+          const isWalletExhausted = error?.code === "WALLET_EXHAUSTED";
           setMessages((prev) => [
             ...prev,
             {
               role: "assistant",
-              content: `❌ ${error?.message || "An error occurred"}`,
-              kind: "text",
+              content: isWalletExhausted
+                ? `⚡ **Your Q-Power balance has run out.**\n\nUpgrade your plan or grab an add-on to keep chatting.`
+                : `❌ ${error?.message || "An error occurred"}`,
+              kind: isWalletExhausted ? "upgrade" : "text",
             },
           ]);
+          if (isWalletExhausted) setUpgradeOpen(true);
         }
 
         setStreaming(false);
