@@ -74,18 +74,48 @@ export function UsageBanner({ percentageUsed, usageTier, darkMode, onUpgradeClic
     }
   }, [usageTier, dismissedTier]);
 
-  const isVisible = usageTier !== "normal" && dismissedTier !== usageTier;
+  const shouldShow = usageTier !== "normal" && dismissedTier !== usageTier;
   const style = TIER_STYLES[usageTier] || TIER_STYLES.notice;
   const isExhausted = usageTier === "exhausted";
 
-  if (!isVisible) return null;
+  // ✅ Exit animation: tailwindcss-animate's animate-in/fade-in only
+  // handles the MOUNT transition — React unmounts the element
+  // immediately on the next render with no chance for any CSS
+  // transition to play. isClosing keeps the element mounted for one
+  // more animation duration, playing a zoom-out/fade-out, then the
+  // element is actually removed.
+  const [isClosing, setIsClosing] = useState(false);
+  const [isMounted, setIsMounted] = useState(shouldShow);
+
+  useEffect(() => {
+    if (shouldShow && !isMounted) {
+      setIsMounted(true);
+      setIsClosing(false);
+    } else if (!shouldShow && isMounted && !isClosing) {
+      setIsClosing(true);
+      const timer = setTimeout(() => {
+        setIsMounted(false);
+        setIsClosing(false);
+      }, 250);
+      return () => clearTimeout(timer);
+    }
+  }, [shouldShow, isMounted, isClosing]);
+
+  const handleDismiss = () => {
+    setDismissedTier(usageTier);
+  };
+
+  if (!isMounted) return null;
 
   return (
     <div
       className={`
         relative w-full overflow-hidden rounded-xl border mb-2
-        animate-in zoom-in-95 fade-in slide-in-from-bottom-1
-        [animation-duration:400ms] [animation-timing-function:cubic-bezier(0.16,1,0.3,1)]
+        [animation-timing-function:cubic-bezier(0.16,1,0.3,1)]
+        ${isClosing
+          ? "animate-out zoom-out-95 fade-out slide-out-to-bottom-1 [animation-duration:250ms]"
+          : "animate-in zoom-in-95 fade-in slide-in-from-bottom-1 [animation-duration:400ms]"
+        }
         ${darkMode ? "bg-[#0d1117] border-white/[0.08]" : "bg-white border-black/[0.08]"}
       `}
     >
@@ -130,7 +160,7 @@ export function UsageBanner({ percentageUsed, usageTier, darkMode, onUpgradeClic
         </div>
 
         <button
-          onClick={() => setDismissedTier(usageTier)}
+          onClick={handleDismiss}
           className={`h-6 w-6 shrink-0 rounded-lg flex items-center justify-center transition-colors duration-150 ${
             darkMode ? "hover:bg-white/10 text-white/40 hover:text-white/70" : "hover:bg-black/10 text-black/40 hover:text-black/70"
           }`}
