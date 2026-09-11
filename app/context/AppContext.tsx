@@ -187,19 +187,21 @@ function mapBootstrapSubscription(
     renewalDate:
       subscription.renews_at ?? null,
 
-    // Do NOT invent these fields. Bootstrap currently doesn't
-    // provide them, so retain existing cached/full-billing values.
-    balance: previous.balance,
+    // ✅ Real values now — bootstrap's percentage_used/usage_tier
+    // are computed directly from wallet balance vs monthly_credits
+    // (see app/api/v1/bootstrap.py's _normalize_subscription), no
+    // longer estimated from stale cached usage.
+    balance: subscription.wallet_balance ?? previous.balance,
     monthlyUsed: previous.monthlyUsed,
     daysRemaining: previous.daysRemaining,
     isLocked: previous.isLocked,
     lockReason: previous.lockReason,
 
+    percentageUsed: subscription.percentage_used ?? 0,
+    usageTier: subscription.usage_tier ?? "normal",
+
     isNearLimit:
-      (subscription.monthly_credits ?? 0) > 0 &&
-      previous.monthlyUsed /
-        (subscription.monthly_credits ?? 0) >
-        0.8,
+      (subscription.percentage_used ?? 0) >= 80,
   };
 }
 

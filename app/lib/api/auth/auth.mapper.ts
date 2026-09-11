@@ -13,6 +13,8 @@ export const DEFAULT_BILLING_STATE: BillingState = {
   isLocked: false,
   lockReason: null,
   isNearLimit: false,
+  percentageUsed: 0,
+  usageTier: "normal",
 };
 
 export function mapBillingResponse(raw: RawBillingResponse): BillingState {
@@ -30,6 +32,13 @@ export function mapBillingResponse(raw: RawBillingResponse): BillingState {
     isLocked: raw.is_locked ?? false,
     lockReason: raw.lock_reason ?? null,
     isNearLimit: fairUseLimit > 0 && monthlyUsed / fairUseLimit > 0.8,
+    // ✅ This mapper feeds from the older RawBillingResponse shape
+    // (not bootstrap), which has no equivalent field — falls back to
+    // deriving from the same fairUseLimit/monthlyUsed ratio already
+    // computed above, so it's at least consistent until this path
+    // is fully replaced by bootstrap's own percentage_used/usage_tier.
+    percentageUsed: fairUseLimit > 0 ? Math.min(100, Math.round((monthlyUsed / fairUseLimit) * 1000) / 10) : 0,
+    usageTier: "normal",
   };
 }
 

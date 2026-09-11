@@ -36,6 +36,12 @@ export interface BillingState {
   isLocked: boolean;
   lockReason: LockReason;
   isNearLimit: boolean;
+  // ✅ Real values from bootstrap now (see mapBootstrapSubscription) —
+  // percentageUsed is authoritative from the backend's own
+  // monthly_credits vs wallet balance math, usageTier is the
+  // pre-computed 10-step ladder (normal/notice/low/.../exhausted).
+  percentageUsed: number;
+  usageTier: string;
 }
 
 // ─── Auth Context Value ───────────────────────────────────────────────────────
@@ -144,6 +150,9 @@ export type BootstrapSubscription = {
   renews_at?: string | null;
   scheduled_plan_name?: string | null;
   scheduled_change_at?: string | null;
+  wallet_balance: number;
+  percentage_used: number;
+  usage_tier: string;
 };
 
 export type BootstrapResponse = {

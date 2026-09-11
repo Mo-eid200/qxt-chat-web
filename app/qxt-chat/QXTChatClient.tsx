@@ -39,6 +39,8 @@ import { useVoiceMessageSync } from "../hooks/useVoiceMessageSync";
 import { useChatLifecycle } from "../hooks/useChatLifecycle";
 import { useSessionAttachments } from "../hooks/useSessionAttachments";
 import { CodePanel } from "./components/CodePanel";
+import { UsageBanner } from "./components/UsageBanner";
+import { useApp } from "../context/AppContext";
 import { DocumentPanel } from "./components/DocumentPanel";
 import type { AgentRuntime } from "../types/agent";
 import type { ChatMessage } from "../types/chat";
@@ -118,6 +120,7 @@ function QXTChatInner({ agentRuntime }: { agentRuntime?: AgentRuntime }) {
   >([]);
 
   const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const { percentageUsed, usageTier } = useApp();
   const [authOpen, setAuthOpen] = useState(false);
 
   const messagesRef = useRef<ChatMessage[]>([]);
@@ -1037,6 +1040,18 @@ onToggleUnread={() => {
           : "mx-auto w-full max-w-[740px] px-4"
       }
     >
+      <UsageBanner
+        percentageUsed={percentageUsed}
+        usageTier={usageTier}
+        darkMode={darkMode}
+        onUpgradeClick={() => setUpgradeOpen(true)}
+        onAddOnsClick={() => {
+          // ✅ Add-ons plans don't exist yet (see conversation) —
+          // placeholder until that modal is built, matching
+          // PersonalUpgradeModal's pattern once it exists.
+          alert("Add-ons are coming soon!");
+        }}
+      />
       <ChatFooter {...footerProps} />
     </div>
   </div>
