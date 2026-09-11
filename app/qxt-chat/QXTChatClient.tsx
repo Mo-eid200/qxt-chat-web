@@ -1044,6 +1044,7 @@ onToggleUnread={() => {
         percentageUsed={percentageUsed}
         usageTier={usageTier}
         darkMode={darkMode}
+        userId={user?.id}
         onUpgradeClick={() => setUpgradeOpen(true)}
         onAddOnsClick={() => {
           // ✅ Add-ons plans don't exist yet (see conversation) —

@@ -7,6 +7,7 @@ type Props = {
   percentageUsed: number;
   usageTier: string;
   darkMode: boolean;
+  userId: string | number | null | undefined;
   onUpgradeClick: () => void;
   onAddOnsClick: () => void;
 };
@@ -24,32 +25,41 @@ const TIER_STYLES: Record<string, { text: string; bar: string; dot: string }> = 
   exhausted: { text: "text-red-200",    bar: "from-red-600 to-red-700",         dot: "bg-red-500" },
 };
 
-const DISMISS_STORAGE_KEY = "qxt_usage_banner_dismissed_tier";
+// ✅ Scoped per-user (not just per-browser) — without the user id in
+// the key, logging out and into a DIFFERENT account on the same
+// browser/device would incorrectly inherit the previous account's
+// dismissal, hiding a banner the new account never actually
+// dismissed. Same account logging back in still correctly stays
+// dismissed, since the key is identical across their own sessions.
+function dismissStorageKey(userId: string | number | null | undefined): string {
+  return `qxt_usage_banner_dismissed_tier_${userId ?? "anon"}`;
+}
 
 // ✅ Single source of truth, matching how large platforms (Claude,
 // ChatGPT, Notion) handle "dismiss until state changes" banners:
 // one boolean ref for whether THIS SPECIFIC tier was dismissed,
 // read/written directly at the moment of the click — no separate
 // effects racing to reconcile derived state against each other.
-function readDismissedTier(): string | null {
+function readDismissedTier(userId: string | number | null | undefined): string | null {
   if (typeof window === "undefined") return null;
   try {
-    return window.localStorage.getItem(DISMISS_STORAGE_KEY);
+    return window.localStorage.getItem(dismissStorageKey(userId));
   } catch {
     return null;
   }
 }
 
-function writeDismissedTier(tier: string | null) {
+function writeDismissedTier(userId: string | number | null | undefined, tier: string | null) {
   try {
-    if (tier) window.localStorage.setItem(DISMISS_STORAGE_KEY, tier);
-    else window.localStorage.removeItem(DISMISS_STORAGE_KEY);
+    const key = dismissStorageKey(userId);
+    if (tier) window.localStorage.setItem(key, tier);
+    else window.localStorage.removeItem(key);
   } catch {
     // ignore — private browsing etc.
   }
 }
 
-export function UsageBanner({ percentageUsed, usageTier, darkMode, onUpgradeClick, onAddOnsClick }: Props) {
+export function UsageBanner({ percentageUsed, usageTier, darkMode, userId, onUpgradeClick, onAddOnsClick }: Props) {
   const isExhausted = usageTier === "exhausted";
   const style = TIER_STYLES[usageTier] || TIER_STYLES.notice;
 
@@ -68,7 +78,7 @@ export function UsageBanner({ percentageUsed, usageTier, darkMode, onUpgradeClic
   // effects.
   useEffect(() => {
     hasHydrated.current = true;
-    const dismissed = readDismissedTier();
+    const dismissed = readDismissedTier(userId);
     const shouldBeVisible = usageTier !== "normal" && dismissed !== usageTier;
 
     if (closeTimer.current) {
@@ -77,10 +87,10 @@ export function UsageBanner({ percentageUsed, usageTier, darkMode, onUpgradeClic
     }
     setClosing(false);
     setVisible(shouldBeVisible);
-  }, [usageTier]);
+  }, [usageTier, userId]);
 
   const handleDismiss = () => {
-    writeDismissedTier(usageTier);
+    writeDismissedTier(userId, usageTier);
     setClosing(true);
     closeTimer.current = setTimeout(() => {
       setVisible(false);
