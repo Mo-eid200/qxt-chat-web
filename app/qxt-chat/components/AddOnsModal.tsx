@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
-import { Loader2, X, Zap, Sparkles } from "lucide-react";
+import { Loader2, X, Zap } from "lucide-react";
 import { createPortal } from "react-dom";
 import { getAddonPacks, createAddonCheckout, type AddonPack } from "@/app/lib/api/console/billing";
 
@@ -18,16 +18,42 @@ function formatPrice(value: number) {
   return Number(value || 0).toLocaleString();
 }
 
-// ✅ Deliberately distinct from PersonalUpgradeModal/WorkspaceUpgradeModal:
-// energetic amber→orange power-meter rows instead of the calm gold
-// pricing-tier cards, so a "top up my balance" action never looks
-// like a "change my subscription" action. Row layout (not a grid of
-// equal boxes) with a filled power-bar per pack visually communicates
-// relative size at a glance — inspired by in-app currency top-up
-// patterns (Discord Nitro Boosts, mobile game credit packs) rather
-// than SaaS pricing-tier tables.
-const PACK_ICON_INTENSITY = [1, 2, 3, 4]; // bolt count scales with pack size
+// ✅ Small, minimal payment-brand marks — simplified geometric
+// recreations (not the official brand files) used the way any
+// checkout page nominatively displays accepted payment methods.
+// Swap these for the real Visa/Mastercard/Amex asset files whenever
+// they're available; these are just placeholders that read clearly
+// at 24px.
+function VisaMark() {
+  return (
+    <div className="flex h-6 w-9 items-center justify-center rounded-[4px] bg-white">
+      <span className="text-[10px] font-black italic tracking-tighter text-[#1a1f71]">VISA</span>
+    </div>
+  );
+}
+function MastercardMark() {
+  return (
+    <div className="flex h-6 w-9 items-center justify-center rounded-[4px] bg-white">
+      <div className="flex items-center">
+        <div className="h-3.5 w-3.5 rounded-full bg-[#eb001b]" />
+        <div className="-ml-1.5 h-3.5 w-3.5 rounded-full bg-[#f79e1b] opacity-90 mix-blend-multiply" />
+      </div>
+    </div>
+  );
+}
+function AmexMark() {
+  return (
+    <div className="flex h-6 w-9 items-center justify-center rounded-[4px] bg-[#2E77BC]">
+      <span className="text-[8px] font-black tracking-tight text-white">AMEX</span>
+    </div>
+  );
+}
 
+// ✅ Compact, minimal, Claude/Linear-style design — small modal
+// width, tight vertical rhythm, subdued single-accent color instead
+// of the previous large glowing power-bar rows. Distinct from
+// PersonalUpgradeModal via a single amber accent color (vs. gold)
+// and a simple bordered-list layout rather than a pricing-tier grid.
 export function AddOnsModal({ open, onClose, targetType = "user", workspaceId }: Props): React.ReactNode {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
@@ -41,7 +67,6 @@ export function AddOnsModal({ open, onClose, targetType = "user", workspaceId }:
   });
 
   const packs = packsData ?? [];
-  const maxUnits = Math.max(...packs.map((p) => p.units), 1);
 
   useEffect(() => {
     if (!open) return;
@@ -58,8 +83,6 @@ export function AddOnsModal({ open, onClose, targetType = "user", workspaceId }:
 
   useEffect(() => {
     if (packs.length > 0 && !selectedId) {
-      // Default to the second-from-last pack (best value sweet spot),
-      // matching the "recommended" pattern top-up platforms use.
       const idx = Math.max(0, packs.length - 2);
       setSelectedId(packs[idx]?.id ?? packs[0].id);
     }
@@ -89,137 +112,95 @@ export function AddOnsModal({ open, onClose, targetType = "user", workspaceId }:
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         onClick={onClose}
-        className="fixed inset-0 z-[9999] overflow-y-auto bg-black/85 backdrop-blur-xl p-4"
+        className="fixed inset-0 z-[9999] overflow-y-auto bg-black/70 backdrop-blur-md p-4"
       >
         <div className="relative min-h-full flex items-center justify-center">
           <motion.div
-            initial={{ opacity: 0, scale: 0.96, y: 18 }}
+            initial={{ opacity: 0, scale: 0.97, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.96, y: 18 }}
-            transition={{ duration: 0.22 }}
+            exit={{ opacity: 0, scale: 0.97, y: 10 }}
+            transition={{ duration: 0.18 }}
             onClick={(e) => e.stopPropagation()}
-            className="relative w-full max-w-[640px] overflow-hidden rounded-[24px] border border-amber-500/20 bg-[#0a0704] shadow-[0_40px_120px_rgba(0,0,0,0.8)]"
+            className="relative w-full max-w-[380px] overflow-hidden rounded-2xl border border-white/[0.08] bg-[#141414] shadow-[0_20px_60px_rgba(0,0,0,0.6)]"
           >
-            {/* Energetic amber/orange radial glow — deliberately warmer
-                and more saturated than the gold-tier modal's subtle
-                top glow, reinforcing "power/energy" over "premium tier". */}
-            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(251,146,60,0.18),transparent_45%)]" />
-            <div className="pointer-events-none absolute -right-20 -top-20 h-64 w-64 rounded-full bg-amber-500/10 blur-3xl" />
-
-            <button
-              onClick={onClose}
-              className="absolute top-4 right-4 z-50 flex items-center justify-center w-9 h-9 rounded-full border border-white/10 bg-white/[0.04] text-white/60 transition-all duration-200 hover:bg-white/[0.08] hover:text-white"
-            >
-              <X className="w-4 h-4" />
-            </button>
-
             {/* HEADER */}
-            <div className="relative border-b border-amber-500/[0.12] px-6 pt-6 pb-5">
-              <div className="flex items-center gap-3">
-                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-amber-500/30 bg-gradient-to-br from-amber-500/20 to-orange-600/20">
-                  <Zap className="h-5 w-5 text-amber-400 fill-amber-400" />
+            <div className="flex items-center justify-between px-5 pt-5 pb-4">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-500/15">
+                  <Zap className="h-4 w-4 text-amber-400" />
                 </div>
-                <div>
-                  <h2 className="font-serif text-[22px] font-bold tracking-tight text-white">Top up Q-Power</h2>
-                  <p className="mt-0.5 text-[13px] text-white/40">One-time charge, credited instantly to your balance</p>
-                </div>
+                <h2 className="font-serif text-[16px] font-semibold text-white">Top up Q-Power</h2>
               </div>
+              <button
+                onClick={onClose}
+                className="flex h-7 w-7 items-center justify-center rounded-lg text-white/40 transition-colors hover:bg-white/[0.06] hover:text-white"
+              >
+                <X className="h-4 w-4" />
+              </button>
             </div>
 
-            {/* CONTENT — power-meter rows, not equal-width cards */}
-            <div className="relative px-4 sm:px-6 py-5">
+            {/* CONTENT — compact list, single accent color */}
+            <div className="px-3 pb-3">
               {loadingPacks ? (
-                <div className="flex items-center justify-center py-20">
-                  <Loader2 className="w-7 h-7 animate-spin text-amber-400" />
+                <div className="flex items-center justify-center py-14">
+                  <Loader2 className="h-5 w-5 animate-spin text-amber-400" />
                 </div>
               ) : (
-                <div className="space-y-2.5">
-                  {packs.map((pack, idx) => {
+                <div className="space-y-1.5">
+                  {packs.map((pack) => {
                     const active = selectedId === pack.id;
-                    const fillPercent = Math.max(18, Math.round((pack.units / maxUnits) * 100));
-                    const isBestValue = idx === packs.length - 2 && packs.length > 1;
-                    const boltCount = PACK_ICON_INTENSITY[Math.min(idx, PACK_ICON_INTENSITY.length - 1)];
-
                     return (
-                      <motion.button
+                      <button
                         key={pack.id}
                         type="button"
-                        whileHover={{ scale: 1.01 }}
-                        transition={{ duration: 0.15 }}
                         onClick={() => setSelectedId(pack.id)}
-                        className={`relative w-full overflow-hidden rounded-2xl border text-left transition-all duration-200 ${
+                        className={`flex w-full items-center justify-between rounded-xl border px-3.5 py-2.5 text-left transition-colors duration-150 ${
                           active
-                            ? "border-amber-400/60 bg-gradient-to-r from-amber-500/[0.12] to-orange-600/[0.06] shadow-[0_0_0_1px_rgba(251,191,36,0.15)]"
-                            : "border-white/[0.06] bg-white/[0.02] hover:border-white/[0.12] hover:bg-white/[0.03]"
+                            ? "border-amber-500/40 bg-amber-500/[0.06]"
+                            : "border-transparent bg-white/[0.02] hover:bg-white/[0.04]"
                         }`}
                       >
-                        {/* Filled power-bar background, proportional to pack size */}
-                        <div
-                          className={`absolute inset-y-0 left-0 transition-all duration-300 ${
-                            active ? "bg-gradient-to-r from-amber-500/[0.08] to-transparent" : "bg-white/[0.015]"
-                          }`}
-                          style={{ width: `${fillPercent}%` }}
-                        />
-
-                        <div className="relative flex items-center gap-4 px-4 py-3.5">
-                          <div className="flex shrink-0 items-center gap-0.5">
-                            {Array.from({ length: boltCount }).map((_, i) => (
-                              <Zap
-                                key={i}
-                                className={`h-3.5 w-3.5 ${active ? "text-amber-400 fill-amber-400" : "text-white/25 fill-white/25"}`}
-                              />
-                            ))}
-                          </div>
-
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-2">
-                              <span className="font-serif text-[15px] font-bold text-white">{pack.name}</span>
-                              {isBestValue && (
-                                <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-300">
-                                  <Sparkles className="h-2.5 w-2.5" />
-                                  Best value
-                                </span>
-                              )}
-                            </div>
-                            <div className="mt-0.5 text-[12px] text-white/40">
-                              {formatPrice(pack.units)} QX-Power
-                            </div>
-                          </div>
-
-                          <div className="shrink-0 text-right">
-                            <div className="text-[17px] font-bold text-white">${formatPrice(pack.price)}</div>
-                          </div>
-
-                          {/* Selection indicator */}
+                        <div className="flex items-center gap-2.5">
                           <div
-                            className={`h-5 w-5 shrink-0 rounded-full border-2 transition-all duration-200 flex items-center justify-center ${
-                              active ? "border-amber-400 bg-amber-400" : "border-white/20"
+                            className={`h-4 w-4 shrink-0 rounded-full border-2 transition-colors ${
+                              active ? "border-amber-400 bg-amber-400" : "border-white/15"
                             }`}
                           >
-                            {active && <div className="h-2 w-2 rounded-full bg-[#0a0704]" />}
+                            {active && <div className="h-full w-full rounded-full border-2 border-[#141414]" />}
+                          </div>
+                          <div>
+                            <div className="text-[13px] font-medium text-white">{pack.name}</div>
+                            <div className="text-[11px] text-white/35">{formatPrice(pack.units)} QX-Power</div>
                           </div>
                         </div>
-                      </motion.button>
+                        <div className="text-[14px] font-semibold text-white">${formatPrice(pack.price)}</div>
+                      </button>
                     );
                   })}
                 </div>
               )}
-
-              <p className="mt-4 text-center text-[11px] text-white/30">
-                Q-Power from add-ons never expires while your subscription stays active.
-              </p>
             </div>
 
             {/* FOOTER */}
-            <div className="relative border-t border-amber-500/[0.12] bg-black/40 backdrop-blur-xl px-6 py-4">
+            <div className="border-t border-white/[0.06] px-5 py-4">
               <button
                 onClick={handlePurchase}
                 disabled={loading || !selectedPack}
-                className="flex w-full items-center justify-center gap-2 h-12 rounded-2xl bg-gradient-to-r from-amber-500 to-orange-600 text-[15px] font-serif font-bold text-black transition-all duration-200 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+                className="flex w-full items-center justify-center gap-2 h-10 rounded-xl bg-amber-500 text-[13px] font-semibold text-black transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
               >
-                {loading && <Loader2 className="w-4 h-4 animate-spin" />}
-                {selectedPack ? `Charge $${formatPrice(selectedPack.price)} now` : "Select a pack"}
+                {loading && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                {selectedPack ? `Pay $${formatPrice(selectedPack.price)}` : "Select a pack"}
               </button>
+
+              <div className="mt-3 flex items-center justify-center gap-1.5">
+                <VisaMark />
+                <MastercardMark />
+                <AmexMark />
+              </div>
+
+              <p className="mt-2.5 text-center text-[10.5px] text-white/25">
+                Never expires while your subscription stays active
+              </p>
             </div>
           </motion.div>
         </div>
