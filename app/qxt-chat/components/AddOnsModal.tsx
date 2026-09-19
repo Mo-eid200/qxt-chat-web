@@ -2,9 +2,8 @@
 
 import React, { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import Image from "next/image";
 import { AnimatePresence, motion } from "framer-motion";
-import { Check, Loader2, X, Zap } from "lucide-react";
+import { Loader2, X, Zap, Sparkles } from "lucide-react";
 import { createPortal } from "react-dom";
 import { getAddonPacks, createAddonCheckout, type AddonPack } from "@/app/lib/api/console/billing";
 
@@ -19,10 +18,16 @@ function formatPrice(value: number) {
   return Number(value || 0).toLocaleString();
 }
 
-// ✅ Same design language as PersonalUpgradeModal/WorkspaceUpgradeModal
-// (min-h-full centering, font-serif, gold accent, framer-motion
-// zoom/fade) — Add-on packs are shown as cards instead of tiers, no
-// billing-cycle toggle (these are one-time purchases, not recurring).
+// ✅ Deliberately distinct from PersonalUpgradeModal/WorkspaceUpgradeModal:
+// energetic amber→orange power-meter rows instead of the calm gold
+// pricing-tier cards, so a "top up my balance" action never looks
+// like a "change my subscription" action. Row layout (not a grid of
+// equal boxes) with a filled power-bar per pack visually communicates
+// relative size at a glance — inspired by in-app currency top-up
+// patterns (Discord Nitro Boosts, mobile game credit packs) rather
+// than SaaS pricing-tier tables.
+const PACK_ICON_INTENSITY = [1, 2, 3, 4]; // bolt count scales with pack size
+
 export function AddOnsModal({ open, onClose, targetType = "user", workspaceId }: Props): React.ReactNode {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
@@ -36,6 +41,7 @@ export function AddOnsModal({ open, onClose, targetType = "user", workspaceId }:
   });
 
   const packs = packsData ?? [];
+  const maxUnits = Math.max(...packs.map((p) => p.units), 1);
 
   useEffect(() => {
     if (!open) return;
@@ -52,7 +58,10 @@ export function AddOnsModal({ open, onClose, targetType = "user", workspaceId }:
 
   useEffect(() => {
     if (packs.length > 0 && !selectedId) {
-      setSelectedId(packs[0].id);
+      // Default to the second-from-last pack (best value sweet spot),
+      // matching the "recommended" pattern top-up platforms use.
+      const idx = Math.max(0, packs.length - 2);
+      setSelectedId(packs[idx]?.id ?? packs[0].id);
     }
   }, [packs, selectedId]);
 
@@ -80,7 +89,7 @@ export function AddOnsModal({ open, onClose, targetType = "user", workspaceId }:
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         onClick={onClose}
-        className="fixed inset-0 z-[9999] overflow-y-auto bg-black/80 backdrop-blur-xl p-4"
+        className="fixed inset-0 z-[9999] overflow-y-auto bg-black/85 backdrop-blur-xl p-4"
       >
         <div className="relative min-h-full flex items-center justify-center">
           <motion.div
@@ -89,9 +98,13 @@ export function AddOnsModal({ open, onClose, targetType = "user", workspaceId }:
             exit={{ opacity: 0, scale: 0.96, y: 18 }}
             transition={{ duration: 0.22 }}
             onClick={(e) => e.stopPropagation()}
-            className="relative w-full max-w-[980px] overflow-hidden rounded-[24px] border border-white/[0.08] bg-[#071019]/98 shadow-[0_40px_120px_rgba(0,0,0,0.75)]"
+            className="relative w-full max-w-[640px] overflow-hidden rounded-[24px] border border-amber-500/20 bg-[#0a0704] shadow-[0_40px_120px_rgba(0,0,0,0.8)]"
           >
-            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(212,175,55,0.10),transparent_34%)]" />
+            {/* Energetic amber/orange radial glow — deliberately warmer
+                and more saturated than the gold-tier modal's subtle
+                top glow, reinforcing "power/energy" over "premium tier". */}
+            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(251,146,60,0.18),transparent_45%)]" />
+            <div className="pointer-events-none absolute -right-20 -top-20 h-64 w-64 rounded-full bg-amber-500/10 blur-3xl" />
 
             <button
               onClick={onClose}
@@ -101,87 +114,112 @@ export function AddOnsModal({ open, onClose, targetType = "user", workspaceId }:
             </button>
 
             {/* HEADER */}
-            <div className="border-b border-white/[0.06] px-6 pt-4 pb-5">
-              <div className="flex items-center gap-4">
-                <div className="relative h-[64px] w-[64px] shrink-0">
-                  <Image src="/oqc-logo.png" alt="OpenQCore" fill priority sizes="48px" className="object-contain" />
+            <div className="relative border-b border-amber-500/[0.12] px-6 pt-6 pb-5">
+              <div className="flex items-center gap-3">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-amber-500/30 bg-gradient-to-br from-amber-500/20 to-orange-600/20">
+                  <Zap className="h-5 w-5 text-amber-400 fill-amber-400" />
                 </div>
                 <div>
-                  <h2 className="font-serif text-[24px] font-semibold tracking-tight text-white">Top up your Q-Power</h2>
-                  <p className="mt-1 text-[13px] text-white/45">One-time purchase, added straight to your balance.</p>
+                  <h2 className="font-serif text-[22px] font-bold tracking-tight text-white">Top up Q-Power</h2>
+                  <p className="mt-0.5 text-[13px] text-white/40">One-time charge, credited instantly to your balance</p>
                 </div>
               </div>
             </div>
 
-            {/* CONTENT */}
-            <div className="px-4 lg:px-6 py-5">
+            {/* CONTENT — power-meter rows, not equal-width cards */}
+            <div className="relative px-4 sm:px-6 py-5">
               {loadingPacks ? (
-                <div className="flex items-center justify-center py-24">
-                  <Loader2 className="w-7 h-7 animate-spin text-[#d4af37]" />
+                <div className="flex items-center justify-center py-20">
+                  <Loader2 className="w-7 h-7 animate-spin text-amber-400" />
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-                  {packs.map((pack) => {
+                <div className="space-y-2.5">
+                  {packs.map((pack, idx) => {
                     const active = selectedId === pack.id;
+                    const fillPercent = Math.max(18, Math.round((pack.units / maxUnits) * 100));
+                    const isBestValue = idx === packs.length - 2 && packs.length > 1;
+                    const boltCount = PACK_ICON_INTENSITY[Math.min(idx, PACK_ICON_INTENSITY.length - 1)];
+
                     return (
-                      <motion.div
+                      <motion.button
                         key={pack.id}
-                        whileHover={{ y: -4 }}
-                        transition={{ duration: 0.18 }}
+                        type="button"
+                        whileHover={{ scale: 1.01 }}
+                        transition={{ duration: 0.15 }}
                         onClick={() => setSelectedId(pack.id)}
-                        className={`relative cursor-pointer rounded-[24px] border transition-all duration-200 ${
-                          active ? "border-[#d4af37]/35 bg-[#0c1520]" : "border-white/[0.06] bg-[#0a111a]"
+                        className={`relative w-full overflow-hidden rounded-2xl border text-left transition-all duration-200 ${
+                          active
+                            ? "border-amber-400/60 bg-gradient-to-r from-amber-500/[0.12] to-orange-600/[0.06] shadow-[0_0_0_1px_rgba(251,191,36,0.15)]"
+                            : "border-white/[0.06] bg-white/[0.02] hover:border-white/[0.12] hover:bg-white/[0.03]"
                         }`}
                       >
-                        <div className="p-5">
-                          <div className="flex items-center gap-2">
-                            <Zap className="w-4 h-4 text-[#d4af37]" />
-                            <h3 className="font-serif text-[20px] font-semibold text-white">{pack.name}</h3>
+                        {/* Filled power-bar background, proportional to pack size */}
+                        <div
+                          className={`absolute inset-y-0 left-0 transition-all duration-300 ${
+                            active ? "bg-gradient-to-r from-amber-500/[0.08] to-transparent" : "bg-white/[0.015]"
+                          }`}
+                          style={{ width: `${fillPercent}%` }}
+                        />
+
+                        <div className="relative flex items-center gap-4 px-4 py-3.5">
+                          <div className="flex shrink-0 items-center gap-0.5">
+                            {Array.from({ length: boltCount }).map((_, i) => (
+                              <Zap
+                                key={i}
+                                className={`h-3.5 w-3.5 ${active ? "text-amber-400 fill-amber-400" : "text-white/25 fill-white/25"}`}
+                              />
+                            ))}
                           </div>
 
-                          <div className="mt-6 flex items-end gap-1">
-                            <span className="text-4xl font-bold tracking-tight text-white">
-                              ${formatPrice(pack.price)}
-                            </span>
-                            <span className="mb-1 text-sm text-white/40">one-time</span>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-serif text-[15px] font-bold text-white">{pack.name}</span>
+                              {isBestValue && (
+                                <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-300">
+                                  <Sparkles className="h-2.5 w-2.5" />
+                                  Best value
+                                </span>
+                              )}
+                            </div>
+                            <div className="mt-0.5 text-[12px] text-white/40">
+                              {formatPrice(pack.units)} QX-Power
+                            </div>
                           </div>
 
-                          <ul className="mt-6 space-y-3">
-                            <li className="flex items-center gap-2 text-sm text-white/75">
-                              <Check className="w-4 h-4 text-emerald-400" />
-                              <span className="font-medium">{formatPrice(pack.units)}</span>
-                              <div className="relative w-4 h-4">
-                                <Image src="/QX-Power.png" alt="QX" fill className="object-contain" />
-                              </div>
-                              QX-Power
-                            </li>
-                            <li className="flex items-center gap-2 text-sm text-white/75">
-                              <Check className="w-4 h-4 text-emerald-400" />
-                              Never expires while subscribed
-                            </li>
-                          </ul>
+                          <div className="shrink-0 text-right">
+                            <div className="text-[17px] font-bold text-white">${formatPrice(pack.price)}</div>
+                          </div>
+
+                          {/* Selection indicator */}
+                          <div
+                            className={`h-5 w-5 shrink-0 rounded-full border-2 transition-all duration-200 flex items-center justify-center ${
+                              active ? "border-amber-400 bg-amber-400" : "border-white/20"
+                            }`}
+                          >
+                            {active && <div className="h-2 w-2 rounded-full bg-[#0a0704]" />}
+                          </div>
                         </div>
-                      </motion.div>
+                      </motion.button>
                     );
                   })}
                 </div>
               )}
+
+              <p className="mt-4 text-center text-[11px] text-white/30">
+                Q-Power from add-ons never expires while your subscription stays active.
+              </p>
             </div>
 
             {/* FOOTER */}
-            <div className="border-t border-white/[0.06] bg-[#071019]/95 backdrop-blur-xl px-6 lg:px-8 py-5">
-              <div className="flex flex-col lg:flex-row items-center justify-between gap-4">
-                <div className="text-sm text-white/45">© OpenQCore AI 2026</div>
-
-                <button
-                  onClick={handlePurchase}
-                  disabled={loading || !selectedPack}
-                  className="inline-flex items-center justify-center gap-2 h-12 min-w-[220px] rounded-2xl px-6 text-sm font-serif font-semibold bg-[#d4af37] text-black transition-all duration-200 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  {loading && <Loader2 className="w-4 h-4 animate-spin" />}
-                  {selectedPack ? `Buy ${selectedPack.name} — $${formatPrice(selectedPack.price)}` : "Select a pack"}
-                </button>
-              </div>
+            <div className="relative border-t border-amber-500/[0.12] bg-black/40 backdrop-blur-xl px-6 py-4">
+              <button
+                onClick={handlePurchase}
+                disabled={loading || !selectedPack}
+                className="flex w-full items-center justify-center gap-2 h-12 rounded-2xl bg-gradient-to-r from-amber-500 to-orange-600 text-[15px] font-serif font-bold text-black transition-all duration-200 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {loading && <Loader2 className="w-4 h-4 animate-spin" />}
+                {selectedPack ? `Charge $${formatPrice(selectedPack.price)} now` : "Select a pack"}
+              </button>
             </div>
           </motion.div>
         </div>
