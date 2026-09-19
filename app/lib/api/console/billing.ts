@@ -108,6 +108,42 @@ export async function createCheckout(
   return data;
 }
 
+// ─── Add-ons (one-time Q-Power top-ups: Boost/Surge/Power/Max) ───────────────
+//
+// Same 4 packs, same pricing, for both personal and workspace wallets —
+// see app/api/v1/billing_router.py's /addons and /addons/checkout.
+
+export interface AddonPack {
+  id:       number;
+  name:     string;
+  units:    number;
+  price:    number;
+  currency: string;
+}
+
+export async function getAddonPacks(): Promise<AddonPack[]> {
+  const { data } = await qxtApiClient.get("/api/v1/billing/addons");
+  return data.addons || [];
+}
+
+export interface AddonCheckoutResult {
+  checkout_url: string;
+  session_id:   string;
+}
+
+export async function createAddonCheckout(
+  addonPackId: number,
+  targetType = "user",
+  workspaceId?: string,
+): Promise<AddonCheckoutResult> {
+  const { data } = await qxtApiClient.post("/api/v1/billing/addons/checkout", {
+    addon_pack_id: addonPackId,
+    target_type:   targetType,
+    workspace_id:  workspaceId || null,
+  });
+  return data;
+}
+
 // ─── Subscription ────────────────────────────────────────────────────────────
 //
 // 🔥 FIX: was missing scheduled_plan_name / scheduled_change_at —

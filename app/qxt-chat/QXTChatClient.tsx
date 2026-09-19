@@ -40,6 +40,7 @@ import { useChatLifecycle } from "../hooks/useChatLifecycle";
 import { useSessionAttachments } from "../hooks/useSessionAttachments";
 import { CodePanel } from "./components/CodePanel";
 import { UsageBanner } from "./components/UsageBanner";
+import { AddOnsModal } from "./components/AddOnsModal";
 import { useApp } from "../context/AppContext";
 import { DocumentPanel } from "./components/DocumentPanel";
 import type { AgentRuntime } from "../types/agent";
@@ -120,6 +121,7 @@ function QXTChatInner({ agentRuntime }: { agentRuntime?: AgentRuntime }) {
   >([]);
 
   const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [addOnsOpen, setAddOnsOpen] = useState(false);
   const { percentageUsed, usageTier } = useApp();
   const [authOpen, setAuthOpen] = useState(false);
 
@@ -1045,7 +1047,7 @@ onToggleUnread={() => {
         onOpenCodePanel={handleOpenCodePanel}
         onOpenDocumentPanel={handleOpenDocumentPanel}
         onUpgradeClick={() => setUpgradeOpen(true)}
-        onAddOnsClick={() => alert("Add-ons are coming soon!")}
+        onAddOnsClick={() => setAddOnsOpen(true)}
       />
     </div>
   )}
@@ -1070,7 +1072,7 @@ onToggleUnread={() => {
           // ✅ Add-ons plans don't exist yet (see conversation) —
           // placeholder until that modal is built, matching
           // PersonalUpgradeModal's pattern once it exists.
-          alert("Add-ons are coming soon!");
+          setAddOnsOpen(true);
         }}
       />
       <ChatFooter {...footerProps} />
@@ -1094,6 +1096,13 @@ onToggleUnread={() => {
                 window.location.href = data.checkout_url;
               }
             }}
+          />
+
+          <AddOnsModal
+            open={addOnsOpen}
+            onClose={() => setAddOnsOpen(false)}
+            targetType={activeSpaceType === "workspace" ? "workspace" : "user"}
+            workspaceId={activeSpaceType === "workspace" ? activeWorkspaceId ?? undefined : undefined}
           />
 
           <RenameDialog
