@@ -510,7 +510,29 @@ const MarkdownContent = memo(function MarkdownContent({
 }) {
   const parts = useMemo(() => {
     if (!content || typeof content !== "string") return [];
-    return content.split(/(```[\s\S]*?```)/);
+    const closed = content.split(/(```[\s\S]*?```)/);
+    // ✅ Handles an UNCLOSED trailing fence — e.g. a reply that got
+    // cut off mid-code-block (hit max_tokens, connection dropped,
+    // etc). Without this, split()'s non-greedy regex requires a
+    // matching closing ``` to produce ANY code part at all; with no
+    // closing fence, the entire message (including hundreds of
+    // lines of code) falls through as one big plain-text blob,
+    // rendered by ReactMarkdown as scattered right-aligned
+    // paragraphs instead of a code block. If the LAST part still
+    // contains an unmatched opening ```, split that tail into
+    // [textBeforeFence, fenceOnward] so the fence-onward portion
+    // still renders as a CodeBlock below (missing its closing marker
+    // is fine — CodeBlock doesn't require one).
+    const last = closed[closed.length - 1];
+    if (last && !last.startsWith("```")) {
+      const openIdx = last.indexOf("```");
+      if (openIdx !== -1) {
+        const before = last.slice(0, openIdx);
+        const openFence = last.slice(openIdx) + "```"; // synthetic close so CodeBlock's `.replace(/```/g, "")` still works
+        return [...closed.slice(0, -1), before, openFence];
+      }
+    }
+    return closed;
   }, [content]);
 
   return (
