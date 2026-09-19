@@ -6,6 +6,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Loader2, X, Zap } from "lucide-react";
 import { createPortal } from "react-dom";
 import { getAddonPacks, createAddonCheckout, type AddonPack } from "@/app/lib/api/console/billing";
+import { PaymentMarksRow } from "./PaymentMarks";
 
 interface Props {
   open: boolean;
@@ -18,36 +19,6 @@ function formatPrice(value: number) {
   return Number(value || 0).toLocaleString();
 }
 
-// ✅ Small, minimal payment-brand marks — simplified geometric
-// recreations (not the official brand files) used the way any
-// checkout page nominatively displays accepted payment methods.
-// Swap these for the real Visa/Mastercard/Amex asset files whenever
-// they're available; these are just placeholders that read clearly
-// at 24px.
-function VisaMark() {
-  return (
-    <div className="flex h-6 w-9 items-center justify-center rounded-[4px] bg-white">
-      <span className="text-[10px] font-black italic tracking-tighter text-[#1a1f71]">VISA</span>
-    </div>
-  );
-}
-function MastercardMark() {
-  return (
-    <div className="flex h-6 w-9 items-center justify-center rounded-[4px] bg-white">
-      <div className="flex items-center">
-        <div className="h-3.5 w-3.5 rounded-full bg-[#eb001b]" />
-        <div className="-ml-1.5 h-3.5 w-3.5 rounded-full bg-[#f79e1b] opacity-90 mix-blend-multiply" />
-      </div>
-    </div>
-  );
-}
-function AmexMark() {
-  return (
-    <div className="flex h-6 w-9 items-center justify-center rounded-[4px] bg-[#2E77BC]">
-      <span className="text-[8px] font-black tracking-tight text-white">AMEX</span>
-    </div>
-  );
-}
 
 // ✅ Compact, minimal, Claude/Linear-style design — small modal
 // width, tight vertical rhythm, subdued single-accent color instead
@@ -192,11 +163,7 @@ export function AddOnsModal({ open, onClose, targetType = "user", workspaceId }:
                 {selectedPack ? `Pay $${formatPrice(selectedPack.price)}` : "Select a pack"}
               </button>
 
-              <div className="mt-3 flex items-center justify-center gap-1.5">
-                <VisaMark />
-                <MastercardMark />
-                <AmexMark />
-              </div>
+              <PaymentMarksRow className="mt-3 justify-center" />
 
               <p className="mt-2.5 text-center text-[10.5px] text-white/25">
                 Never expires while your subscription stays active

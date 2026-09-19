@@ -7,6 +7,7 @@ import { Check, Crown, Loader2, Sparkles, X, ArrowDownCircle, Building2, Plus } 
 import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import { getPlans, type Plan as ApiPlan } from "@/app/lib/api/console/billing";
+import { PaymentMarksRow } from "./PaymentMarks";
 
 /* =========================================================
    TYPES
@@ -450,8 +451,11 @@ export function WorkspaceUpgradeModal({
 
             <div className="border-t border-white/[0.06] bg-[#0a0506]/95 backdrop-blur-xl px-6 lg:px-8 py-5">
               <div className="flex flex-col lg:flex-row items-center justify-between gap-4">
-                <div className="flex flex-col gap-1">
-                  <div className="text-sm text-white/45">© OpenQCore AI 2026</div>
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center gap-3">
+                    <div className="text-sm text-white/45">© OpenQCore AI 2026</div>
+                    <PaymentMarksRow />
+                  </div>
                   {isDowngrade && (
                     <div className="flex items-center gap-1.5 text-[11px] text-red-300/80">
                       <ArrowDownCircle className="w-3 h-3" />
