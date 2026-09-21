@@ -131,7 +131,10 @@ export type BootstrapWorkspace = {
   seat_limit: number;
   billing_cycle?: string | null;
   renews_at?: string | null;
+  monthly_credits: number;
   wallet_balance: number;
+  percentage_used: number;
+  usage_tier: string;
   projects_count: number;
   members_count: number;
   agents_count: number;

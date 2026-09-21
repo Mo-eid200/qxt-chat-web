@@ -416,3 +416,38 @@ export function useApp(): AppState {
 
   return context;
 }
+
+// ✅ Separate from useApp()'s billing state on purpose — that state
+// is hardcoded to bootstrap.personal_subscription (see the
+// mapBootstrapSubscription call above), so UsageBanner always showed
+// the PERSONAL wallet's usage even while the user was actively
+// working inside a workspace. This reads bootstrap.workspaces
+// directly (same source QXTChatClient already uses for AddOnsModal's
+// workspaceId) and computes the SAME tier ladder bootstrap.py's
+// _usage_tier uses server-side, but for whichever workspace the
+// caller asks for — so the banner can reflect whichever wallet
+// (personal or a specific workspace) the user is actually spending
+// from right now.
+export function useWorkspaceUsage(workspaceId: string | null | undefined) {
+  const { bootstrap } = useAuth();
+
+  return useMemo(() => {
+    if (!workspaceId || !bootstrap) {
+      return { percentageUsed: 0, usageTier: "normal" };
+    }
+
+    // ✅ bootstrap.py's _normalize_workspace already computes these
+    // server-side with the exact same tier ladder — using them
+    // directly (instead of recomputing from monthly_credits/
+    // wallet_balance here) avoids the two ever drifting out of sync.
+    const workspace = bootstrap.workspaces?.find((w) => w.id === workspaceId);
+    if (!workspace) {
+      return { percentageUsed: 0, usageTier: "normal" };
+    }
+
+    return {
+      percentageUsed: workspace.percentage_used ?? 0,
+      usageTier: workspace.usage_tier ?? "normal",
+    };
+  }, [bootstrap, workspaceId]);
+}

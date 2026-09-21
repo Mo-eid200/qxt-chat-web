@@ -41,7 +41,7 @@ import { useSessionAttachments } from "../hooks/useSessionAttachments";
 import { CodePanel } from "./components/CodePanel";
 import { UsageBanner } from "./components/UsageBanner";
 import { AddOnsModal } from "./components/AddOnsModal";
-import { useApp } from "../context/AppContext";
+import { useApp, useWorkspaceUsage } from "../context/AppContext";
 import { DocumentPanel } from "./components/DocumentPanel";
 import type { AgentRuntime } from "../types/agent";
 import type { ChatMessage } from "../types/chat";
@@ -122,7 +122,19 @@ function QXTChatInner({ agentRuntime }: { agentRuntime?: AgentRuntime }) {
 
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [addOnsOpen, setAddOnsOpen] = useState(false);
-  const { percentageUsed, usageTier } = useApp();
+  const { percentageUsed: personalPercentageUsed, usageTier: personalUsageTier } = useApp();
+  // ✅ FIX: the banner was always showing the PERSONAL wallet's usage
+  // (useApp()'s billing state is hardcoded to
+  // bootstrap.personal_subscription — see AppContext.tsx), even
+  // while the user was actively working inside a workspace and
+  // spending from ITS wallet instead. useWorkspaceUsage() reads the
+  // matching workspace's own percentage_used/usage_tier from
+  // bootstrap.workspaces when in workspace mode.
+  const workspaceUsage = useWorkspaceUsage(
+    activeSpaceType === "workspace" ? activeWorkspaceId : null
+  );
+  const percentageUsed = activeSpaceType === "workspace" ? workspaceUsage.percentageUsed : personalPercentageUsed;
+  const usageTier = activeSpaceType === "workspace" ? workspaceUsage.usageTier : personalUsageTier;
   const [authOpen, setAuthOpen] = useState(false);
 
   const messagesRef = useRef<ChatMessage[]>([]);
