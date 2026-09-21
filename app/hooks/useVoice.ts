@@ -583,17 +583,16 @@ export const useVoice = ({
 
         setIsRecording(true);
 
+        // ✅ No longer posts a "recording" placeholder bubble —
+        // VoiceOrbOverlay.tsx is the actual recording UI (the big
+        // glowing orb), so this chat-bubble stand-in was a redundant
+        // second indicator. The reply now starts appearing directly
+        // once text_delta events arrive, instead of replacing a
+        // "Recording..." bubble first.
         const turnId = `voice-${Date.now()}`;
         turnIdRef.current = turnId;
 
-        onMessageAction?.({
-            id: turnId,
-            role: "user",
-            kind: "recording",
-            text: "",
-        });
-
-    }, [cleanupAudio, onMessageAction, sendAudioToBackend, onStreamAction]);
+    }, [cleanupAudio, sendAudioToBackend, onStreamAction]);
 
     // ========================
     // ⏸️ PAUSE / RESUME RECORDING
