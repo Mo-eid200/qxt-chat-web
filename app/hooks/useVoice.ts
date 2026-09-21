@@ -447,6 +447,26 @@ export const useVoice = ({
                 }
 
                 if (code === "WALLET_EXHAUSTED" || code === "FREE_LIMIT_REACHED") {
+                    // ✅ Clears any partial/empty assistant bubble this
+                    // turn already created (e.g. text_delta events that
+                    // arrived before the request ultimately failed) —
+                    // same __VOICE_CANCEL__ mechanism useVoiceMessageSync.ts
+                    // already uses to remove a turn's bubbles entirely,
+                    // so the upgrade message below isn't preceded by a
+                    // dangling "..." bubble.
+                    const cancelTurnId = turnIdRef.current;
+                    if (cancelTurnId) {
+                        onMessageAction?.({
+                            id: cancelTurnId,
+                            role: "user",
+                            text: "__VOICE_CANCEL__",
+                        });
+                        onMessageAction?.({
+                            id: `assistant-${cancelTurnId}`,
+                            role: "assistant",
+                            text: "__VOICE_CANCEL__",
+                        });
+                    }
                     // ✅ Delegates to the SAME handler the typed chat
                     // uses for this identical error (QXTChatClient.tsx's
                     // onQuotaExceeded — posts the upgrade bubble AND
