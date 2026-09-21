@@ -902,24 +902,14 @@ const [searchOpen, setSearchOpen] =
                           ? "Workspace chats"
                           : "Chats"}
                   </div>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setActiveSection(runtimeAgentId ? "agents" : "chats");
-                      props.onNewChatAction();
-                    }}
-                    className={cn(
-                      "h-6 w-6 rounded-md flex items-center justify-center transition-colors",
-                      props.darkMode
-                        ? "text-white/45 hover:text-white/80 hover:bg-white/[0.06]"
-                        : "text-slate-500 hover:text-slate-800 hover:bg-black/[0.05]"
-                    )}
-                    aria-label="New chat"
-                    title="New chat"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                  </button>
+                  {/* ✅ Removed the redundant "+" New Chat button that
+                      was here — it called the exact same
+                      onNewChatAction() as the main "New workspace
+                      chat" button up top, just duplicated in a second
+                      spot, which was confusing and (per user report)
+                      implicated in a "session deleted" error when
+                      pressed in certain states. The single button up
+                      top is now the only entry point. */}
                 </div>
 
                 {activeSection !== "members" ? (
