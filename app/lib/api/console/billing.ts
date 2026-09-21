@@ -144,6 +144,20 @@ export async function createAddonCheckout(
   return data;
 }
 
+// ✅ Non-admin members can't purchase (checkout endpoints are
+// admin-gated server-side) — this lets them notify their workspace's
+// admins/owners instead. See POST /billing/workspaces/{id}/request-upgrade.
+export async function requestWorkspaceUpgrade(
+  workspaceId: string,
+  requestType: "plan" | "addons",
+): Promise<{ notified_admins: number }> {
+  const { data } = await qxtApiClient.post(
+    `/api/v1/billing/workspaces/${workspaceId}/request-upgrade`,
+    { request_type: requestType }
+  );
+  return data;
+}
+
 // ─── Subscription ────────────────────────────────────────────────────────────
 //
 // 🔥 FIX: was missing scheduled_plan_name / scheduled_change_at —

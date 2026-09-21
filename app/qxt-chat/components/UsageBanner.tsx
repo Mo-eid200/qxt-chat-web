@@ -10,6 +10,14 @@ type Props = {
   userId: string | number | null | undefined;
   onUpgradeClick: () => void;
   onAddOnsClick: () => void;
+  // ✅ When set to false (workspace context, non-admin member), the
+  // banner shows "Request Upgrade"/"Request Add-ons" instead — a
+  // member can't actually purchase either (both checkout endpoints
+  // are admin-gated server-side), so this notifies the workspace's
+  // admins instead of opening a checkout modal that would just 403.
+  isWorkspaceAdmin?: boolean;
+  onRequestUpgradeClick?: () => void;
+  onRequestAddOnsClick?: () => void;
 };
 
 // ✅ Same 8-tier ladder as the backend's _USAGE_TIERS (bootstrap.py) —
@@ -59,7 +67,17 @@ function writeDismissedTier(userId: string | number | null | undefined, tier: st
   }
 }
 
-export function UsageBanner({ percentageUsed, usageTier, darkMode, userId, onUpgradeClick, onAddOnsClick }: Props) {
+export function UsageBanner({
+  percentageUsed,
+  usageTier,
+  darkMode,
+  userId,
+  onUpgradeClick,
+  onAddOnsClick,
+  isWorkspaceAdmin = true,
+  onRequestUpgradeClick,
+  onRequestAddOnsClick,
+}: Props) {
   const isExhausted = usageTier === "exhausted";
   const style = TIER_STYLES[usageTier] || TIER_STYLES.notice;
 
@@ -144,7 +162,7 @@ export function UsageBanner({ percentageUsed, usageTier, darkMode, userId, onUpg
         {isExhausted && (
           <div className="flex items-center gap-2 shrink-0">
             <button
-              onClick={onUpgradeClick}
+              onClick={isWorkspaceAdmin ? onUpgradeClick : onRequestUpgradeClick}
               className={`
                 inline-flex items-center gap-1 text-[12px] font-serif font-semibold
                 px-2.5 py-1 rounded-lg transition-colors duration-150
@@ -152,10 +170,10 @@ export function UsageBanner({ percentageUsed, usageTier, darkMode, userId, onUpg
               `}
             >
               <ArrowUpCircle className="w-3 h-3" />
-              Upgrade Plan
+              {isWorkspaceAdmin ? "Upgrade Plan" : "Request Upgrade"}
             </button>
             <button
-              onClick={onAddOnsClick}
+              onClick={isWorkspaceAdmin ? onAddOnsClick : onRequestAddOnsClick}
               className={`
                 inline-flex items-center gap-1 text-[12px] font-serif font-semibold
                 px-2.5 py-1 rounded-lg transition-colors duration-150
@@ -163,7 +181,7 @@ export function UsageBanner({ percentageUsed, usageTier, darkMode, userId, onUpg
               `}
             >
               <PlusCircle className="w-3 h-3" />
-              Add-ons
+              {isWorkspaceAdmin ? "Add-ons" : "Request Add-ons"}
             </button>
           </div>
         )}

@@ -11,6 +11,25 @@ import React, {
 } from "react";
 import { useRouter } from "next/navigation";
 
+// ✅ Production fix: these were previously created INSIDE the
+// component function body, meaning next/dynamic re-created a brand
+// new lazy-loaded component definition on every single render —
+// defeating dynamic()'s whole purpose (a stable component reference
+// that loads its chunk once and reuses it) and potentially causing
+// unnecessary remounts/flicker. Module-level (here) is the correct,
+// documented usage.
+const AuthModal = dynamic(() => import("./components/AuthModal"), {
+  ssr: false,
+});
+const PersonalUpgradeModal = dynamic(
+  () => import("./components/PersonalUpgradeModal").then((m) => m.PersonalUpgradeModal),
+  { ssr: false }
+);
+const WorkspaceUpgradeModal = dynamic(
+  () => import("./components/WorkspaceUpgradeModal").then((m) => m.WorkspaceUpgradeModal),
+  { ssr: false }
+);
+
 import { ChatHeader } from "./components/ChatHeader";
 import ChatSidebar from "./components/sidebar/ChatSidebar";
 import { ChatFooter } from "./components/ChatFooter";
@@ -42,6 +61,7 @@ import { CodePanel } from "./components/CodePanel";
 import { UsageBanner } from "./components/UsageBanner";
 import { AddOnsModal } from "./components/AddOnsModal";
 import { useApp, useWorkspaceUsage } from "../context/AppContext";
+import { requestWorkspaceUpgrade } from "../lib/api/console/billing";
 import { DocumentPanel } from "./components/DocumentPanel";
 import type { AgentRuntime } from "../types/agent";
 import type { ChatMessage } from "../types/chat";
@@ -59,18 +79,12 @@ export default function QXTChatClient({
   return <QXTChatInner agentRuntime={agentRuntime} />;
 }
 
-  const AuthModal = dynamic(() => import("./components/AuthModal"), {
-  ssr: false,
-  });
-  const PersonalUpgradeModal = dynamic(
-     () => import("./components/PersonalUpgradeModal").then((m) => m.PersonalUpgradeModal),
-     { ssr: false }
-   );
+
 
 function QXTChatInner({ agentRuntime }: { agentRuntime?: AgentRuntime }) {
   const router = useRouter();
 
-  const { user, loadingUser, logout } = useAuth();
+  const { user, loadingUser, logout, bootstrap } = useAuth();
   const isLoggedIn = !!user;
 
 
@@ -122,6 +136,7 @@ function QXTChatInner({ agentRuntime }: { agentRuntime?: AgentRuntime }) {
 
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [addOnsOpen, setAddOnsOpen] = useState(false);
+  const [workspaceUpgradeOpen, setWorkspaceUpgradeOpen] = useState(false);
   const { percentageUsed: personalPercentageUsed, usageTier: personalUsageTier } = useApp();
   // ✅ FIX: the banner was always showing the PERSONAL wallet's usage
   // (useApp()'s billing state is hardcoded to
@@ -1058,7 +1073,9 @@ onToggleUnread={() => {
         bottomRef={bottomRef}
         onOpenCodePanel={handleOpenCodePanel}
         onOpenDocumentPanel={handleOpenDocumentPanel}
-        onUpgradeClick={() => setUpgradeOpen(true)}
+        onUpgradeClick={() =>
+          activeSpaceType === "workspace" ? setWorkspaceUpgradeOpen(true) : setUpgradeOpen(true)
+        }
         onAddOnsClick={() => setAddOnsOpen(true)}
       />
     </div>
@@ -1079,12 +1096,31 @@ onToggleUnread={() => {
         usageTier={usageTier}
         darkMode={darkMode}
         userId={user?.id}
-        onUpgradeClick={() => setUpgradeOpen(true)}
-        onAddOnsClick={() => {
-          // ✅ Add-ons plans don't exist yet (see conversation) —
-          // placeholder until that modal is built, matching
-          // PersonalUpgradeModal's pattern once it exists.
-          setAddOnsOpen(true);
+        isWorkspaceAdmin={
+          activeSpaceType !== "workspace" ||
+          bootstrap?.workspaces?.find((w) => w.id === activeWorkspaceId)?.role === "owner" ||
+          bootstrap?.workspaces?.find((w) => w.id === activeWorkspaceId)?.role === "admin"
+        }
+        onUpgradeClick={() =>
+          activeSpaceType === "workspace" ? setWorkspaceUpgradeOpen(true) : setUpgradeOpen(true)
+        }
+        onAddOnsClick={() => setAddOnsOpen(true)}
+        onRequestUpgradeClick={async () => {
+          if (!activeWorkspaceId) return;
+          try {
+            await requestWorkspaceUpgrade(activeWorkspaceId, "plan");
+          } catch {
+            // best-effort notify — failure isn't actionable for the
+            // member beyond what the button already communicated
+          }
+        }}
+        onRequestAddOnsClick={async () => {
+          if (!activeWorkspaceId) return;
+          try {
+            await requestWorkspaceUpgrade(activeWorkspaceId, "addons");
+          } catch {
+            // best-effort notify — see above
+          }
         }}
       />
       <ChatFooter {...footerProps} />
@@ -1115,6 +1151,38 @@ onToggleUnread={() => {
             onClose={() => setAddOnsOpen(false)}
             targetType={activeSpaceType === "workspace" ? "workspace" : "user"}
             workspaceId={activeSpaceType === "workspace" ? activeWorkspaceId ?? undefined : undefined}
+          />
+
+          <WorkspaceUpgradeModal
+            open={workspaceUpgradeOpen}
+            onClose={() => setWorkspaceUpgradeOpen(false)}
+            workspaces={(bootstrap?.workspaces ?? []).map((w) => ({
+              id: w.id,
+              name: w.name,
+              plan: w.plan_name ?? undefined,
+              planId: w.plan_id ?? null,
+            }))}
+            currentPlanId={
+              bootstrap?.workspaces?.find((w) => w.id === activeWorkspaceId)?.plan_id ?? null
+            }
+            onUpgrade={async ({ planId, billing, workspaceId }) => {
+              const res = await fetch(`${API_BASE}/api/v1/billing/checkout`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                credentials: "include",
+                body: JSON.stringify({
+                  plan_id: planId,
+                  billing_cycle: billing,
+                  target_type: "workspace",
+                  workspace_id: workspaceId ?? activeWorkspaceId,
+                }),
+              });
+
+              const data = await res.json();
+              if (data?.checkout_url) {
+                window.location.href = data.checkout_url;
+              }
+            }}
           />
 
           <RenameDialog
