@@ -413,6 +413,30 @@ export const useVoice = ({
                 turnIdRef.current = turnId;
 
                 await fetchMeta(blob, turnId);
+            } catch (err: any) {
+                // ✅ FIX: this try block had no catch at all — fetchMeta()
+                // throwing (e.g. the 402 WALLET_EXHAUSTED error from
+                // res.ok checks) went completely uncaught, so setError()
+                // never ran and the UI stayed stuck on "Thinking..."
+                // forever with no visible feedback. Parse the backend's
+                // {code, message} JSON error body when present (matches
+                // chat.py's WALLET_EXHAUSTED shape) for a clear message,
+                // falling back to the raw error text otherwise.
+                let message = err?.message || "Voice request failed";
+                try {
+                    const parsed = JSON.parse(message);
+                    if (parsed?.message) message = parsed.message;
+                    else if (parsed?.code === "WALLET_EXHAUSTED") {
+                        message = "You've used today's free requests and your Q-Power balance is exhausted.";
+                    } else if (parsed?.code === "FREE_LIMIT_REACHED") {
+                        message = "You've used today's free requests. Try again tomorrow or upgrade your plan.";
+                    }
+                } catch {
+                    // not JSON — keep the raw message as-is
+                }
+                setError(message);
+                setIsProcessing(false);
+                setIsSpeaking(false);
             } finally {
                 isSendingRef.current = false;
             }
