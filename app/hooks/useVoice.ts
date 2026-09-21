@@ -430,8 +430,18 @@ export const useVoice = ({
                 let message = err?.message || "Voice request failed";
                 try {
                     const parsed = JSON.parse(message);
-                    code = parsed?.code ?? null;
-                    if (parsed?.message) message = parsed.message;
+                    // ✅ FIX: the backend's real error shape is
+                    // {"success":false,"error":{"code":"WALLET_EXHAUSTED",
+                    // "message":"...","extra":{"limit":3,"used":3}}} —
+                    // code/message are nested under error.*, not top-level.
+                    // Reading parsed?.code directly always returned
+                    // undefined, so WALLET_EXHAUSTED/FREE_LIMIT_REACHED
+                    // never matched and this silently fell through to
+                    // the plain setError(raw JSON) branch below instead
+                    // of triggering the upgrade bubble + modal.
+                    const errObj = parsed?.error ?? parsed;
+                    code = errObj?.code ?? null;
+                    if (errObj?.message) message = errObj.message;
                 } catch {
                     // not JSON — keep the raw message as-is
                 }
