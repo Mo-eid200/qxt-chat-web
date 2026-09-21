@@ -56,6 +56,13 @@ interface ChatFooterProps {
   loading: boolean;
   lang: "en" | "ar";
   darkMode: boolean;
+  // ✅ Passed through to useVoice() so voice requests carry the same
+  // X-Workspace-ID/X-Space-Type headers the typed chat's requestPayload
+  // already sends — without these, every voice turn was billed
+  // against the personal wallet regardless of which workspace the
+  // user was actually working in.
+  activeSpaceType?: string;
+  activeWorkspaceId?: string | null;
   placeholder: string;
   onChange: (value: string) => void;
   onSend: (data: {
@@ -128,6 +135,7 @@ IconBtn.displayName = "IconBtn";
 
 export function ChatFooter({
   input, loading, lang, darkMode, placeholder,
+  activeSpaceType, activeWorkspaceId,
   onChange, onSend,
   pendingImages, setPendingImages,
   pendingDocuments = [], setPendingDocuments,
@@ -269,6 +277,8 @@ const handleVoiceSessionCreated = useCallback((id: string) => {
     voiceMode: !!selectedModel,
     selectedModel: selectedModel ? { id: selectedModel.id } : undefined,
     sessionId: sessionId || undefined,
+    activeSpaceType,
+    activeWorkspaceId,
     onSessionCreatedAction: handleVoiceSessionCreated,
     onCompleteAction: handleVoiceComplete,
     onMessageAction: handleVoiceMessageAction,

@@ -32,6 +32,15 @@ type Props = {
     onMessageAction?: (data: VoiceMessagePayload) => void;
     onSessionCreatedAction?: (id: string) => void;
     onStreamAction?: (stream: MediaStream | null) => void;
+    // ✅ FIX: voice requests never sent these, so the backend's
+    // auth.workspace_id was always null — every voice turn was
+    // billed against the PERSONAL wallet even while the user was
+    // actively inside a workspace with its own balance, causing a
+    // 402 "Insufficient balance" (stuck on "Thinking...") whenever
+    // the personal wallet was exhausted despite the active
+    // workspace having a healthy balance.
+    activeSpaceType?: string;
+    activeWorkspaceId?: string | null;
 };
 
 export const useVoice = ({
@@ -42,6 +51,8 @@ export const useVoice = ({
     onMessageAction,
     onSessionCreatedAction,
     onStreamAction,
+    activeSpaceType,
+    activeWorkspaceId,
 }: Props) => {
     // ========================
     // STATE
@@ -140,10 +151,14 @@ export const useVoice = ({
 
     const buildAuthHeaders = useCallback(() => {
         const token = getStoredToken();
+        const isWorkspace = activeSpaceType === "workspace" && !!activeWorkspaceId;
         return {
             ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            "X-Space-Type": isWorkspace ? "workspace" : "user",
+            "X-Scope-Type": isWorkspace ? "workspace" : "user",
+            ...(isWorkspace ? { "X-Workspace-ID": activeWorkspaceId as string } : {}),
         };
-    }, []);
+    }, [activeSpaceType, activeWorkspaceId]);
 
     const abortWithTimeout = useCallback(() => {
         abortControllerRef.current = new AbortController();
