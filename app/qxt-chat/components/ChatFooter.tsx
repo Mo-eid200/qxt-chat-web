@@ -48,7 +48,7 @@ type VoiceMessage = {
   text?: string;
   audioUrl?: string;
   role: "user" | "assistant";
-  kind?: "audio" | "recording" | "audio_update" | "text" | "stream_update";
+  kind?: "audio" | "recording" | "audio_update" | "text" | "stream_update" | "upgrade";
 };
 
 interface ChatFooterProps {
@@ -283,6 +283,7 @@ const handleVoiceSessionCreated = useCallback((id: string) => {
     onCompleteAction: handleVoiceComplete,
     onMessageAction: handleVoiceMessageAction,
     onStreamAction: setVoiceStream,
+    onQuotaExceeded,
   });
 
   const {

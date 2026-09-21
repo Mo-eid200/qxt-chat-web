@@ -4,7 +4,7 @@ import { useRef, useState, useEffect, useCallback } from "react";
 import { API_BASE } from "../lib/config";
 import { getStoredToken } from "../lib/api/core/qxtClient";
 
-type VoiceKind = "audio" | "recording" | "text" | "stream_update" | "audio_update";
+type VoiceKind = "audio" | "recording" | "text" | "stream_update" | "audio_update" | "upgrade";
 
 type VoiceMessagePayload = {
     id?: string;
@@ -41,6 +41,12 @@ type Props = {
     // workspace having a healthy balance.
     activeSpaceType?: string;
     activeWorkspaceId?: string | null;
+    // ✅ Same callback the typed chat's ChatFooter already accepts
+    // (onQuotaExceeded prop, wired in QXTChatClient.tsx) for the
+    // identical WALLET_EXHAUSTED/FREE_LIMIT_REACHED case — reusing it
+    // here means voice gets the exact same upgrade-bubble + modal-open
+    // behavior with no duplicated logic.
+    onQuotaExceeded?: () => void;
 };
 
 export const useVoice = ({
@@ -53,6 +59,7 @@ export const useVoice = ({
     onStreamAction,
     activeSpaceType,
     activeWorkspaceId,
+    onQuotaExceeded,
 }: Props) => {
     // ========================
     // STATE
@@ -418,30 +425,33 @@ export const useVoice = ({
                 // throwing (e.g. the 402 WALLET_EXHAUSTED error from
                 // res.ok checks) went completely uncaught, so setError()
                 // never ran and the UI stayed stuck on "Thinking..."
-                // forever with no visible feedback. Parse the backend's
-                // {code, message} JSON error body when present (matches
-                // chat.py's WALLET_EXHAUSTED shape) for a clear message,
-                // falling back to the raw error text otherwise.
+                // forever with no visible feedback.
+                let code: string | null = null;
                 let message = err?.message || "Voice request failed";
                 try {
                     const parsed = JSON.parse(message);
+                    code = parsed?.code ?? null;
                     if (parsed?.message) message = parsed.message;
-                    else if (parsed?.code === "WALLET_EXHAUSTED") {
-                        message = "You've used today's free requests and your Q-Power balance is exhausted.";
-                    } else if (parsed?.code === "FREE_LIMIT_REACHED") {
-                        message = "You've used today's free requests. Try again tomorrow or upgrade your plan.";
-                    }
                 } catch {
                     // not JSON — keep the raw message as-is
                 }
-                setError(message);
+
+                if (code === "WALLET_EXHAUSTED" || code === "FREE_LIMIT_REACHED") {
+                    // ✅ Delegates to the SAME handler the typed chat
+                    // uses for this identical error (QXTChatClient.tsx's
+                    // onQuotaExceeded — posts the upgrade bubble AND
+                    // opens the correct modal, personal or workspace).
+                    onQuotaExceeded?.();
+                } else {
+                    setError(message);
+                }
                 setIsProcessing(false);
                 setIsSpeaking(false);
             } finally {
                 isSendingRef.current = false;
             }
         },
-        [fetchMeta]
+        [fetchMeta, onQuotaExceeded]
     );
 
     // ========================
